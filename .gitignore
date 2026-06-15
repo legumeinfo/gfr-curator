@@ -1,0 +1,28 @@
+.env
+.venv
+__pycache__/
+
+# Python build/distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+*$py.class
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS/IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Generated YAML drafts
+*.yml
+*.yaml

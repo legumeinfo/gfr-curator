@@ -1,0 +1,4 @@
+# GFR Curator Python CLI Dependencies
+# The curation assistant is built to run on pure Python standard libraries.
+# Add custom packages here if you expand features in the future.
+rich>=13.0.0

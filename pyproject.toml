@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gfr-curator"
+version = "0.1.0"
+description = "Automated AI-assisted biocurator for the Legume Information System (LIS) Gene Function Registry."
+readme = "README.md"
+authors = [
+    { name = "LegumeInfo Curators", email = "curator@legumeinfo.org" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.7"
+dependencies = [
+    "rich>=13.0.0",
+    "requests"
+]
+
+[project.urls]
+Homepage = "https://github.com/legumeinfo/gene-function-registry"
+
+[project.scripts]
+gfr-curate = "gfr_curator.cli:main"
