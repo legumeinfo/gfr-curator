@@ -1,8 +1,11 @@
 import sys
 import os
+from dotenv import load_dotenv
 from gfr_curator.curator import GFRCurator
 from rich.console import Console
 from rich.panel import Panel
+
+load_dotenv()
 
 console = Console()
 
