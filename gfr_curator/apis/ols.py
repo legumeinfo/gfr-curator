@@ -27,5 +27,5 @@ def lookup_ontology_term(query, ontology="to,go,po,pato"):
         err_console.print(f"[bold yellow][!] Warning: Failed to lookup ontology term '{query}': {e}[/bold yellow]")
     return {
         "entity_name": query,
-        "entity": "TO:XXXXXXX"  # Fallback code
+        "entity": "TODO:0000000"  # Schema-compliant fallback code for unmapped terms
     }

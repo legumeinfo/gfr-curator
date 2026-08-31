@@ -19,7 +19,9 @@ requires-python = ">=3.7"
 dependencies = [
     "rich>=13.0.0",
     "requests",
-    "python-dotenv"
+    "python-dotenv",
+    "PyYAML>=6.0",
+    "jsonschema>=4.0.0"
 ]
 
 [project.urls]
@@ -27,3 +29,7 @@ Homepage = "https://github.com/legumeinfo/gene-function-registry"
 
 [project.scripts]
 gfr-curate = "gfr_curator.cli:main"
+gfr-validate = "gfr_curator.validator:main"
+
+[tool.setuptools.package-data]
+gfr_curator = ["schema.json"]

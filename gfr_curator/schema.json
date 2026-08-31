@@ -1,0 +1,150 @@
+{
+    "type": "object",
+    "properties": {
+        "scientific_name": {
+            "description": "Genus species",
+            "type": "string",
+            "pattern": "^[A-Z][a-z]+ [a-z]+$"
+        },
+        "classical_locus": {
+            "description": "Short string signifying genetic locus",
+            "type": "string",
+            "pattern": "^(?!none).*$"
+        },
+        "gene_symbols": {
+            "description": "List of gene symbols, in a yaml array, e.g. Ah|Gm|Gs|Lj|Ms|Mt|Ps|Pv|Vf|Vr",
+            "type": "array",
+            "items": {
+                "type": "string",
+                "pattern": "^[A-Z][a-z]\\S+$"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+        },
+        "gene_symbol_long": {
+            "description": "Name of primary/first gene symbol",
+            "type": "string",
+            "pattern": "^(?!none).*$"
+        },
+        "gene_model_pub_name": {
+            "description": "Gene identifier used in the publication",
+            "type": "string"
+        },
+        "gene_model_full_id": {
+            "description": "Gene model name from LIS datastore, with prefix; form gensp.Strain.gnm#.ann#.geneID",
+            "type": "string",
+            "pattern": "^[^.\\s]+\\.[^.\\s]+\\.[^.\\s]+(\\.[^.\\s]+)*$"
+        },
+        "confidence": {
+            "description": "Integer between 1 and 5, with 5 indicating rigorous validation; 1 and 2 low confidence, and avoided",
+            "type": [
+                "integer"
+            ],
+            "minimum": 2,
+            "maximum": 5
+        },
+        "curators": {
+            "description": "Name(s) of one or more curators, in a yaml array",
+            "type": "array",
+            "items": {
+                "type": "string"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+        },
+        "comments": {
+            "description": "Comments explaining key aspects of the biology or curation, in a yaml array",
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "phenotype_synopsis": {
+            "description": "Short description of the phenotypic effect of the gene (mutant or over expression)",
+            "type": "string",
+            "maxLength": 500,
+            "pattern": "^(?!none).*$"
+        },
+        "references": {
+            "description": "Array of citations with sub-array of doi and pmid",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "citation": {
+                        "description": "String with format 'Author, Author et al., YEAR', 'Author, Author, YEAR', or 'Author, YEAR'",
+                        "type": "string",
+                        "pattern": "(^\\S+\\s*\\S+, \\S+\\s*\\S+ et al\\., \\d{4}$)|(^\\S+\\s*\\S+, ^\\S+\\s*\\S+, \\d{4}$)|(^\\S+\\s*\\S+, \\d{4}$)"
+                    },
+                    "doi": {
+                        "description": "DOI pointing to the dataset; NOTE this is NOT a URI!",
+                        "type": "string",
+                        "pattern": "10\\.\\d{4,9}.+"
+                    },
+                    "pmid": {
+                        "description": "PMID",
+                        "type": [
+                            "integer"
+                        ],
+                        "maximum": 99999999
+                    }
+                },
+                "required": [
+                    "citation"
+                ],
+                "anyOf": [
+                    {
+                        "required": [
+                            "doi"
+                        ]
+                    },
+                    {
+                        "required": [
+                            "pmid"
+                        ]
+                    }
+                ]
+            }
+        },
+        "traits": {
+            "description": "List of traits associated with this gene",
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "entity_name": {
+                        "description": "Human-readable name of ontology term, e.g., 'defense response to nematode'",
+                        "type": "string",
+                        "pattern": "^(?!none).*$"
+                    },
+                    "entity": {
+                        "description": "Ontology accession with format 'NS:###', where NS is the namespace, e.g. TO or GO",
+                        "type": "string",
+                        "pattern": "^[A-Za-z]+_*\\d*:[A-Z]*\\d{5,}$"
+                    },
+                    "relation_name": {
+                        "description": "Human-readable name of ontology term, e.g., 'defense response to nematode'",
+                        "type": "string",
+                        "pattern": "^(?!none).*$"
+                    },
+                    "relation": {
+                        "description": "Ontology accession with format 'RO:###', where RO is the relation ontology",
+                        "type": "string",
+                        "pattern": "^(RO|PATO):\\d{7}$"
+                    }
+                }
+            }
+        }
+    },
+    "required": [
+        "scientific_name",
+        "gene_symbols",
+        "gene_model_pub_name",
+        "gene_model_full_id",
+        "confidence",
+        "phenotype_synopsis",
+        "traits",
+        "references"
+    ],
+    "additionalProperties": false
+}

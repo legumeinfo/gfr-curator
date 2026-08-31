@@ -19,6 +19,7 @@ def fetch_ncbi_metadata(doi):
     first_author = "Author"
     abstract = ""
     
+    authors = []
     # 1. Query Europe PMC to resolve DOI metadata
     try:
         epmc_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:{doi}&format=json"
@@ -35,7 +36,13 @@ def fetch_ncbi_metadata(doi):
                 
                 author_string = paper.get("authorString", "")
                 if author_string:
-                    first_author = author_string.split(",")[0].split(" ")[0]
+                    raw_authors = [a.strip() for a in author_string.rstrip(".").split(",") if a.strip()]
+                    for a in raw_authors:
+                        surname = a.split(" ")[0].strip()
+                        if surname:
+                            authors.append(surname)
+                    if authors:
+                        first_author = authors[0]
     except Exception as e:
         print(f"[!] Warning: Failed to query Europe PMC: {e}", file=sys.stderr)
 
@@ -58,6 +65,7 @@ def fetch_ncbi_metadata(doi):
         "journal": journal,
         "year": pub_year,
         "first_author": first_author,
+        "authors": authors,
         "abstract": abstract
     }
 

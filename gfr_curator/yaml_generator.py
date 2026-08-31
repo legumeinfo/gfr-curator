@@ -37,8 +37,10 @@ def build_yaml_document(extracted, paper_meta, resolved_traits, gensp, lis_gene_
         
     yaml_lines.append("references:")
     yaml_lines.append(f"  - citation: {paper_meta['citation']}")
-    yaml_lines.append(f"    doi: {paper_meta['doi']}")
-    yaml_lines.append(f"    pmid: {paper_meta['pmid']}")
+    if paper_meta.get('doi') and paper_meta['doi'] not in ("null", "~"):
+        yaml_lines.append(f"    doi: {paper_meta['doi']}")
+    if paper_meta.get('pmid') and str(paper_meta['pmid']).isdigit() and paper_meta['pmid'] != "null":
+        yaml_lines.append(f"    pmid: {int(paper_meta['pmid'])}")
 
     return "\n".join(yaml_lines) + "\n"
 

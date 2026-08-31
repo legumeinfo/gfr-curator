@@ -3,3 +3,6 @@
 # Add custom packages here if you expand features in the future.
 rich>=13.0.0
 python-dotenv
+requests
+PyYAML>=6.0
+jsonschema>=4.0.0

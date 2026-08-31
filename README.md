@@ -46,6 +46,21 @@ Or pass the key directly as an argument:
 gfr-curate 10.1093/jxb/erw425 --key your_api_key_here
 ```
 
-### Output
+### Output & Automatic Schema Validation
 
-The generated GFR-compliant YAML drafts will be saved automatically to your current working directory.
+The generated YAML drafts will be saved automatically to your current working directory and validated automatically against the official `schema.json` specification.
+
+### Standalone Validation
+
+You can validate existing YAML records against `schema.json` anytime using either the `gfr-validate` command or the `--validate` flag:
+
+```bash
+# Using gfr-validate command
+gfr-validate path/to/record.yml
+
+# Using gfr-curate flag
+gfr-curate --validate path/to/record.yml
+
+# With a custom schema file
+gfr-validate path/to/record.yml --schema path/to/custom_schema.json
+```

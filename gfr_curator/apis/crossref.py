@@ -22,9 +22,14 @@ def fetch_crossref_metadata(doi):
             if titles:
                 title = titles[0]
                 
-            authors = message.get("author", [])
+            authors = []
+            author_objs = message.get("author", [])
+            for author_obj in author_objs:
+                family = author_obj.get("family")
+                if family:
+                    authors.append(family)
             if authors:
-                first_author = authors[0].get("family", "Author")
+                first_author = authors[0]
                 
             date_parts = message.get("created", {}).get("date-parts", [[]])[0]
             if date_parts:
@@ -35,5 +40,6 @@ def fetch_crossref_metadata(doi):
     return {
         "title": title,
         "first_author": first_author,
+        "authors": authors if 'authors' in locals() else [first_author],
         "year": pub_year
     }
