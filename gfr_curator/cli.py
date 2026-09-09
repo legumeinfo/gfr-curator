@@ -16,10 +16,21 @@ def main():
     ))
     
     # 1. Parse command line arguments or prompt interactively
+    if "--validate" in sys.argv:
+        from gfr_curator.validator import validate_yaml_file
+        idx = sys.argv.index("--validate")
+        if idx + 1 < len(sys.argv):
+            target_file = sys.argv[idx + 1]
+            is_valid, _ = validate_yaml_file(target_file, verbose=True)
+            sys.exit(0 if is_valid else 1)
+        else:
+            console.print("[bold red][!] Error: --validate requires a path to a YAML file.[/bold red]")
+            sys.exit(1)
+
     doi = ""
     if len(sys.argv) > 1:
         if sys.argv[1] in ("-h", "--help"):
-            print("Usage: gfr-curate [DOI] [--key GEMINI_API_KEY]")
+            print("Usage: gfr-curate [DOI] [--key GEMINI_API_KEY] [--validate FILE]")
             sys.exit(0)
         if not sys.argv[1].startswith("--"):
             doi = sys.argv[1]

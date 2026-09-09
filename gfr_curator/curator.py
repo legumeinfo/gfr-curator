@@ -6,10 +6,25 @@ from gfr_curator.apis.ols import lookup_ontology_term
 from gfr_curator.apis.lis_graphql import resolve_lis_identifier
 from gfr_curator.llm import query_gemini_api
 from gfr_curator.yaml_generator import build_yaml_document, resolve_filename
+from gfr_curator.validator import validate_yaml_file
 from rich.console import Console
 from rich.syntax import Syntax
 
 console = Console()
+
+def format_citation(authors, first_author, year):
+    """
+    Formats citation string to match GFR schema regex requirements:
+    'Author, Author et al., YEAR', 'Author, Author, YEAR', or 'Author, YEAR'
+    """
+    if authors:
+        if len(authors) == 1:
+            return f"{authors[0]}, {year}"
+        elif len(authors) == 2:
+            return f"{authors[0]}, {authors[1]}, {year}"
+        else:
+            return f"{authors[0]}, {authors[1]} et al., {year}"
+    return f"{first_author}, {year}"
 
 class GFRCurator:
     def __init__(self, doi, api_key):
@@ -30,11 +45,13 @@ class GFRCurator:
                 paper_meta["title"] = paper_meta["title"] if paper_meta["title"] != "null" else crossref_meta["title"]
                 if paper_meta["first_author"] == "Author":
                     paper_meta["first_author"] = crossref_meta["first_author"]
+                if not paper_meta.get("authors"):
+                    paper_meta["authors"] = crossref_meta.get("authors", [paper_meta["first_author"]])
                 if paper_meta["year"] == "null":
                     paper_meta["year"] = crossref_meta["year"]
                     
             # Re-verify and format citation
-            citation = f"{paper_meta['first_author']} et al., {paper_meta['year']}"
+            citation = format_citation(paper_meta.get("authors", []), paper_meta.get("first_author", "Author"), paper_meta.get("year", "null"))
             paper_meta["citation"] = citation
             
         console.print("\n[bold green][+] Paper Resolved:[/bold green]")
@@ -126,6 +143,11 @@ class GFRCurator:
             console.print("\n=== YAML Curation Document Output ===")
             console.print(syntax)
             console.print("=====================================\n")
+            
+            # 7. Automatically validate generated YAML against schema
+            is_valid, _ = validate_yaml_file(output_filename, out_console=console, verbose=True)
+            if not is_valid:
+                console.print("[bold yellow][!] Warning: The generated draft has schema validation errors. Please inspect above.[/bold yellow]\n")
             
             return output_filename
         except Exception as e:
