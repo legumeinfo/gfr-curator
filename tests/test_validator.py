@@ -80,7 +80,9 @@ class TestValidator(unittest.TestCase):
         self.assertTrue(any("citation" in err for err in results[0]["errors"]))
 
     def test_validate_sample_file(self):
-        sample_path = os.path.join(os.path.dirname(__file__), "..", "glyma.Tang_2017.yml")
+        sample_path = os.path.join(os.path.dirname(__file__), "..", "glyma.Tang_Su_2017.yml")
+        if not os.path.exists(sample_path):
+            sample_path = os.path.join(os.path.dirname(__file__), "..", "glyma.Tang_2017.yml")
         if os.path.exists(sample_path):
             is_valid, results = validate_yaml_file(sample_path, verbose=False)
             self.assertTrue(is_valid)
