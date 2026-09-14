@@ -155,7 +155,7 @@ def main():
     """
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         console.print("Usage: [bold green]gfr-validate[/bold green] <path_to_yaml_file> [--schema <path_to_schema.json>]")
-        console.print("Example: gfr-validate glyma.Tang_2017.yml")
+        console.print("Example: gfr-validate glyma.Tang_Su_2017.yml")
         sys.exit(0)
         
     yaml_file = sys.argv[1]
