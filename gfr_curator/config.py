@@ -40,6 +40,8 @@ def get_provider_info(model: str):
     if not model:
         return ("Gemini", "GEMINI_API_KEY", "https://aistudio.google.com/")
     m = model.lower()
+    if "openrouter" in m:
+        return ("OpenRouter", "OPENROUTER_API_KEY", "https://openrouter.ai/keys")
     if "gpt" in m or "openai" in m or m.startswith("o1") or m.startswith("o3"):
         return ("OpenAI", "OPENAI_API_KEY", "https://platform.openai.com/api-keys")
     if "claude" in m or "anthropic" in m:
@@ -123,47 +125,108 @@ def is_configured() -> bool:
     if not config_file.exists():
         return False
     data = read_config_dict()
-    return bool(data.get("LLM_MODEL") or data.get("GEMINI_API_KEY") or data.get("OPENAI_API_KEY"))
+    return bool(data.get("LLM_MODEL") or any(k.endswith("_KEY") for k in data))
 
 def get_all_known_models() -> list:
     """
-    Returns a deduplicated list of all known models from curated models and LiteLLM's registry.
+    Returns a deduplicated list of chat models dynamically pulled from LiteLLM's registry,
+    prioritizing primary providers (Gemini, OpenAI, Anthropic, DeepSeek, Groq, Mistral, Ollama, OpenRouter).
     """
-    curated = [
-        "gemini/gemini-flash-lite-latest",
-        "gemini/gemini-3.8-flash",
-        "gemini/gemini-2.5-pro",
-        "gpt-4o",
-        "gpt-4o-mini",
-        "o1",
-        "o1-mini",
-        "o3-mini",
-        "claude-3-7-sonnet-20250219",
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "groq/llama-3.3-70b-versatile",
-        "groq/llama-3.1-8b-instant",
-        "mistral/mistral-large-latest",
-        "mistral/mistral-small-latest",
-        "deepseek/deepseek-chat",
-        "deepseek/deepseek-reasoner",
-        "ollama/llama3",
-        "ollama/llama3.2",
-        "ollama/deepseek-r1",
-        "ollama/qwen2.5",
-        "ollama/mistral",
+    seen = set()
+    models = []
+
+    # Include default quick-pick choices first
+    for m, _ in MODEL_CHOICES:
+        if m not in seen:
+            seen.add(m)
+            models.append(m)
+
+    primary_providers = [
+        "gemini",
+        "openai",
+        "anthropic",
+        "deepseek",
+        "groq",
+        "mistral",
+        "ollama",
+        "openrouter",
     ]
-    seen = set(curated)
-    all_models = list(curated)
+
+    excluded_keywords = (
+        "ft:", "embed", "whisper", "tts", "dall-e", "imagen", "image",
+        "moderation", "guard", "babbage", "davinci", "curie", "ada",
+        "1024-x-", "1536-x-", "video", "audio", "transcribe", "translate",
+        "robotics", "computer-use", "realtime", "live-preview", "live-translate",
+    )
+
+    def is_desirable_chat(name: str, meta: dict = None) -> bool:
+        nl = name.lower()
+        if any(kw in nl for kw in excluded_keywords):
+            return False
+        if meta and isinstance(meta, dict):
+            mode = meta.get("mode")
+            if mode and mode != "chat":
+                return False
+        return True
+
+    def model_sort_key(name: str):
+        nl = name.lower()
+        is_flagship = any(k in nl for k in (
+            "4o", "flash", "pro", "sonnet", "haiku", "opus", "chat",
+            "reasoner", "r1", "codestral", "large", "small", "o1", "o3", "latest"
+        ))
+        return (0 if is_flagship else 1, name)
+
     try:
         import litellm
-        for m in getattr(litellm, "model_list", []):
-            if m and m not in seen and not m.startswith("bedrock/") and not m.startswith("sagemaker/"):
-                seen.add(m)
-                all_models.append(m)
+        cost_dict = getattr(litellm, "model_cost", {})
+        models_by_prov = getattr(litellm, "models_by_provider", {})
+
+        # 1. Primary provider chat models
+        for prov in primary_providers:
+            prov_models = []
+            for name, meta in cost_dict.items():
+                if not isinstance(meta, dict):
+                    continue
+                if meta.get("litellm_provider", "").lower() == prov and is_desirable_chat(name, meta):
+                    formatted = f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name
+                    if formatted not in seen:
+                        seen.add(formatted)
+                        prov_models.append(formatted)
+
+            for name in models_by_prov.get(prov, set()):
+                if is_desirable_chat(name):
+                    formatted = f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name
+                    if formatted not in seen:
+                        seen.add(formatted)
+                        prov_models.append(formatted)
+
+            prov_models.sort(key=model_sort_key)
+            models.extend(prov_models)
+
+        # 2. Other chat models in cost_dict
+        other_chat = []
+        for name, meta in cost_dict.items():
+            if isinstance(meta, dict) and meta.get("mode") == "chat" and is_desirable_chat(name, meta):
+                if name not in seen and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
+                    seen.add(name)
+                    other_chat.append(name)
+        other_chat.sort(key=model_sort_key)
+        models.extend(other_chat)
+
+        # 3. Any remaining models from litellm.model_list
+        other_general = []
+        for name in getattr(litellm, "model_list", []):
+            if is_desirable_chat(name) and name not in seen and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
+                seen.add(name)
+                other_general.append(name)
+        other_general.sort()
+        models.extend(other_general)
+
     except Exception:
         pass
-    return all_models
+
+    return models
 
 try:
     from prompt_toolkit.completion import Completer, Completion

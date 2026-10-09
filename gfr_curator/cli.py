@@ -26,7 +26,7 @@ def resolve_api_key(model: str, key_arg: str = None) -> str:
     if os.environ.get(env_var):
         return os.environ.get(env_var)
     # Check general fallbacks
-    for fallback_var in ("GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+    for fallback_var in ("OPENROUTER_API_KEY", "DEEPSEEK_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
         if os.environ.get(fallback_var):
             return os.environ.get(fallback_var)
     return None
@@ -36,7 +36,7 @@ def main():
     load_user_config()
 
     console.print(Panel.fit(
-        "[bold cyan]LIS Gene Function Registry[/bold cyan]\n[italic]Automated Curation Tool (powered by LiteLLM)[/italic]", 
+        "[bold cyan]LIS Gene Function Registry[/bold cyan]\n[italic]Automated Curation Tool[/italic]", 
         border_style="cyan"
     ))
     
@@ -45,8 +45,8 @@ def main():
         print("Usage: gfr-curate [DOI] [--model MODEL] [--key API_KEY] [--configure] [--validate FILE]")
         print("\nOptions:")
         print("  DOI                Digital Object Identifier of the publication")
-        print("  --model MODEL      LLM model identifier via LiteLLM (e.g. gpt-4o, claude-3-5-sonnet-20241022,")
-        print("                     gemini/gemini-flash-lite-latest, ollama/llama3)")
+        print("  --model MODEL      LLM model identifier (e.g. gpt-4o, claude-3-5-sonnet-20241022,")
+        print("                     gemini/gemini-flash-lite-latest")
         print("  --key API_KEY      API key for the selected model provider")
         print("  --configure        Run interactive wizard to set or update default model & API credentials")
         print("  --validate FILE    Validate a YAML record draft against schema")

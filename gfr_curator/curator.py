@@ -67,7 +67,7 @@ class GFRCurator:
             sys.exit(1)
             
         model_display = self.model or os.environ.get("LLM_MODEL") or os.environ.get("GFR_MODEL") or os.environ.get("GEMINI_MODEL") or "Gemini (LiteLLM)"
-        with console.status(f"[bold cyan]Contacting LLM API ({model_display})...[/bold cyan]", spinner="dots"):
+        with console.status(f"[bold cyan]Contacting LLM ({model_display})...[/bold cyan]", spinner="dots"):
             extracted_list = query_llm(paper_meta["abstract"], api_key=self.api_key, model=self.model)
         if isinstance(extracted_list, dict):
             extracted_list = [extracted_list]
@@ -76,11 +76,16 @@ class GFRCurator:
         output_filename = None
         
         for extracted in extracted_list:
-            console.print(f"[*] Processing extracted gene: [bold magenta]{extracted.get('gene_symbols', ['Unknown'])[0]}[/bold magenta]...")
+            gene_symbols = extracted.get("gene_symbols") or ["Unknown"]
+            if isinstance(gene_symbols, str):
+                gene_symbols = [gene_symbols]
+            symbol_label = gene_symbols[0] if gene_symbols else "Unknown"
+            console.print(f"[*] Processing extracted gene: [bold magenta]{symbol_label}[/bold magenta]...")
             # 3. Resolve Genus/Species Prefixes
             genus_prefix = "gen"
             species_prefix = "sp"
-            sci_name_parts = extracted.get("scientific_name", "").split(" ")
+            sci_name = extracted.get("scientific_name") or ""
+            sci_name_parts = sci_name.strip().split(" ")
             if len(sci_name_parts) >= 1 and sci_name_parts[0]:
                 genus_prefix = sci_name_parts[0].lower()[:3]
             if len(sci_name_parts) >= 2 and sci_name_parts[1]:
