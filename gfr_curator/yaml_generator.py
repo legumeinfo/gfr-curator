@@ -5,31 +5,44 @@ def build_yaml_document(extracted, paper_meta, resolved_traits, gensp, lis_gene_
     """
     Serializes extracted metadata into an official GFR-compliant YAML structure.
     """
+    sci_name = extracted.get("scientific_name") or "Unknown species"
     yaml_lines = [
         "---",
-        f"scientific_name: {extracted['scientific_name']}",
+        f"scientific_name: {sci_name}",
     ]
     if extracted.get("classical_locus"):
         yaml_lines.append(f"classical_locus: {extracted['classical_locus']}")
     
     yaml_lines.append("gene_symbols:")
-    for sym in extracted["gene_symbols"]:
+    symbols = extracted.get("gene_symbols") or ["Unknown"]
+    if isinstance(symbols, str):
+        symbols = [symbols]
+    for sym in symbols:
         yaml_lines.append(f"  - {sym}")
         
-    yaml_lines.append(f"gene_symbol_long: {extracted['gene_symbol_long']}")
-    yaml_lines.append(f"gene_model_pub_name: {extracted['gene_model_pub_name'] if extracted.get('gene_model_pub_name') else '~'}")
+    long_sym = extracted.get("gene_symbol_long") or (symbols[0] if symbols else "Unknown")
+    yaml_lines.append(f"gene_symbol_long: {long_sym}")
+    pub_name = extracted.get("gene_model_pub_name")
+    yaml_lines.append(f"gene_model_pub_name: {pub_name if pub_name else '~'}")
     
     yaml_lines.append(f"gene_model_full_id: {lis_gene_id}")
-    yaml_lines.append(f"confidence: {extracted['confidence']}")
+    conf = extracted.get("confidence", 3)
+    yaml_lines.append(f"confidence: {conf}")
     
     yaml_lines.append("curators:")
     yaml_lines.append("  - AI Curation Assistant")
     
     yaml_lines.append("comments:")
-    for comment in extracted["comments"]:
-        yaml_lines.append(f"  - \"{comment}\"")
+    comments = extracted.get("comments") or ["Characterized in publication"]
+    if isinstance(comments, str):
+        comments = [comments]
+    for comment in comments:
+        clean_comment = comment.replace('"', '\\"')
+        yaml_lines.append(f"  - \"{clean_comment}\"")
         
-    yaml_lines.append(f"phenotype_synopsis: \"{extracted['phenotype_synopsis']}\"")
+    synopsis = extracted.get("phenotype_synopsis") or "Characterized in publication"
+    clean_synopsis = synopsis.replace('"', '\\"')
+    yaml_lines.append(f"phenotype_synopsis: \"{clean_synopsis}\"")
     
     yaml_lines.append("traits:")
     for trait in resolved_traits:

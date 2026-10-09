@@ -1,66 +1,88 @@
-# LIS Gene Function Registry (GFR) Curation Assistant (`gfr-curator`)
+# Gene Function Registry Curator (`gfr-curator`)
 
-An automated, curator CLI tool for the Legume Information System [Gene Function Registry](https://github.com/legumeinfo/gene-function-registry). Given a research paper DOI, the tool retrieves metadata and abstracts, then uses Gemini to extract gene functions, resolves ontology terms in real-time, and produces a valid GFR-compliant YAML record draft.
+A command-line tool for curating records for the Legume Information System [Gene Function Registry](https://github.com/legumeinfo/gene-function-registry). Given a publication DOI, it fetches paper metadata and abstracts, extracts gene function annotations using an LLM, maps ontology terms, and generates schema-validated YAML drafts.
 
 ## Installation
 
-To install the tool in editable mode:
+Install with [`pipx`](https://pipx.pypa.io/) (recommended) or `pip`:
 
 ```bash
+pipx install git+https://github.com/legumeinfo/gfr-curator.git
+```
+
+For local development:
+
+```bash
+git clone https://github.com/legumeinfo/gfr-curator.git
 cd gfr-curator
 pip install -e .
 ```
-Or with venv:
+
+## Configuration
+
+On first run, `gfr-curate` prompts you to choose a default model and enter its API key. Settings are saved to `~/.config/gfr-curator/config.env` with owner-only permissions (`0600`).
+
+To update your model or API key:
 
 ```bash
-cd gfr-curator
-python -m venv venv
-source venv/bin/activate
-pip install -e .
+gfr-curate --configure
 ```
+
+You can also set API keys through environment variables (`GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `LLM_API_KEY`).
 
 ## Usage
 
-Ensure your Gemini API Key is set first:
+### Curate a Paper
+
+Pass a DOI directly:
+
 ```bash
-export GEMINI_API_KEY="your_api_key_here"
-```
-Or, create a `.env` file in the `gfr-curator` directory with the following content:
-```dotenv
-GEMINI_API_KEY="your_api_key_here"
+gfr-curate 10.1093/jxb/erw425
 ```
 
-### 1. Interactive Mode
-Run the tool without arguments:
+Or run without arguments to enter the DOI interactively:
+
 ```bash
 gfr-curate
 ```
 
-### 2. Direct Mode
-Provide the DOI as a command-line argument:
+Generated YAML files are saved to the current directory and validated against the GFR schema.
+
+### Model Selection
+
+Override your default model with `--model` (supports any [LiteLLM model](https://docs.litellm.ai/docs/providers)):
+
 ```bash
-gfr-curate 10.1093/jxb/erw425
+# OpenAI
+gfr-curate 10.1093/jxb/erw425 --model gpt-4o
+
+# Anthropic
+gfr-curate 10.1093/jxb/erw425 --model claude-3-5-sonnet-20241022
+
+# Local model via Ollama (no API key needed)
+gfr-curate 10.1093/jxb/erw425 --model ollama/llama3
+
+# Pass an API key directly
+gfr-curate 10.1093/jxb/erw425 --model gpt-4o --key <api-key>
 ```
-Or pass the key directly as an argument:
-```bash
-gfr-curate 10.1093/jxb/erw425 --key your_api_key_here
-```
 
-### Output & Automatic Schema Validation
+### Validate Records
 
-The generated YAML drafts will be saved automatically to your current working directory and validated automatically against the official `schema.json` specification.
-
-### Standalone Validation
-
-You can validate existing YAML records against `schema.json` anytime using either the `gfr-validate` command or the `--validate` flag:
+Validate existing YAML records against `schema.json`:
 
 ```bash
-# Using gfr-validate command
 gfr-validate path/to/record.yml
-
-# Using gfr-curate flag
-gfr-curate --validate path/to/record.yml
-
-# With a custom schema file
-gfr-validate path/to/record.yml --schema path/to/custom_schema.json
 ```
+
+Or with a custom schema:
+
+```bash
+gfr-validate path/to/record.yml --schema path/to/schema.json
+```
+
+You can also validate through `gfr-curate`:
+
+```bash
+gfr-curate --validate path/to/record.yml
+```
+
