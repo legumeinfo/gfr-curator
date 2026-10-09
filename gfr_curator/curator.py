@@ -4,7 +4,7 @@ from gfr_curator.apis.ncbi import fetch_ncbi_metadata, search_gene_model_by_symb
 from gfr_curator.apis.crossref import fetch_crossref_metadata
 from gfr_curator.apis.ols import lookup_ontology_term
 from gfr_curator.apis.lis_graphql import resolve_lis_identifier
-from gfr_curator.llm import query_gemini_api
+from gfr_curator.llm import query_llm, query_gemini_api
 from gfr_curator.yaml_generator import build_yaml_document, resolve_filename
 from gfr_curator.validator import validate_yaml_file
 from rich.console import Console
@@ -27,9 +27,10 @@ def format_citation(authors, first_author, year):
     return f"{first_author}, {year}"
 
 class GFRCurator:
-    def __init__(self, doi, api_key):
+    def __init__(self, doi, api_key=None, model=None):
         self.doi = doi
         self.api_key = api_key
+        self.model = model
         
     def execute(self):
         # 1. Fetch live metadata and abstract
@@ -65,8 +66,9 @@ class GFRCurator:
             console.print("[bold red][!] Error: No abstract could be fetched for this paper, cannot perform LLM extraction.[/bold red]")
             sys.exit(1)
             
-        with console.status("[bold cyan]Contacting Gemini API...[/bold cyan]", spinner="dots"):
-            extracted_list = query_gemini_api(self.api_key, paper_meta["abstract"])
+        model_display = self.model or os.environ.get("LLM_MODEL") or os.environ.get("GFR_MODEL") or os.environ.get("GEMINI_MODEL") or "Gemini (LiteLLM)"
+        with console.status(f"[bold cyan]Contacting LLM API ({model_display})...[/bold cyan]", spinner="dots"):
+            extracted_list = query_llm(paper_meta["abstract"], api_key=self.api_key, model=self.model)
         if isinstance(extracted_list, dict):
             extracted_list = [extracted_list]
             
