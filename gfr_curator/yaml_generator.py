@@ -1,30 +1,48 @@
 import re
 import sys
 
+def strip_html_tags(text: str) -> str:
+    """Strips HTML/XML formatting tags (<i>, <em>, <jats:italic>, <b>, <strong>, etc.) from text."""
+    if not text or not isinstance(text, str):
+        return ""
+    return re.sub(r"</?(?:[a-zA-Z0-9_-]+:)?(?:i|em|italic|b|strong|bold|sub|sup|span|p|div)[^>]*>", "", str(text), flags=re.IGNORECASE).strip()
+
 def build_yaml_document(extracted, paper_meta, resolved_traits, gensp, lis_gene_id="TODO_RESOLVE_LIS_ID"):
     """
     Serializes extracted metadata into an official GFR-compliant YAML structure.
     """
-    sci_name = extracted.get("scientific_name") or "Unknown species"
+    sci_name = strip_html_tags(extracted.get("scientific_name") or "Unknown species")
     yaml_lines = [
         "---",
         f"scientific_name: {sci_name}",
     ]
     if extracted.get("classical_locus"):
-        yaml_lines.append(f"classical_locus: {extracted['classical_locus']}")
+        yaml_lines.append(f"classical_locus: {strip_html_tags(extracted['classical_locus'])}")
     
     yaml_lines.append("gene_symbols:")
     symbols = extracted.get("gene_symbols") or ["Unknown"]
     if isinstance(symbols, str):
         symbols = [symbols]
     for sym in symbols:
-        yaml_lines.append(f"  - {sym}")
+        yaml_lines.append(f"  - {strip_html_tags(sym)}")
         
     long_sym = extracted.get("gene_symbol_long") or (symbols[0] if symbols else "Unknown")
-    yaml_lines.append(f"gene_symbol_long: {long_sym}")
+    yaml_lines.append(f"gene_symbol_long: {strip_html_tags(long_sym)}")
     pub_name = extracted.get("gene_model_pub_name")
-    yaml_lines.append(f"gene_model_pub_name: {pub_name if pub_name else '~'}")
+    if not pub_name or pub_name == "~":
+        yaml_lines.append('gene_model_pub_name: "~"')
+    else:
+        clean_pub_name = strip_html_tags(pub_name)
+        if clean_pub_name == "~":
+            yaml_lines.append('gene_model_pub_name: "~"')
+        else:
+            yaml_lines.append(f"gene_model_pub_name: {clean_pub_name}")
     
+    if not lis_gene_id or "TODO" in lis_gene_id:
+        clean_sym = re.sub(r"[^\w-]", "", str(symbols[0] if symbols else "RESOLVE_LIS_ID"))
+        target_name = (strip_html_tags(pub_name) if (pub_name and pub_name != "~") else clean_sym) or "RESOLVE_LIS_ID"
+        lis_gene_id = f"{gensp}.TODO.TODO.{target_name}"
+
     yaml_lines.append(f"gene_model_full_id: {lis_gene_id}")
     conf = extracted.get("confidence", 3)
     yaml_lines.append(f"confidence: {conf}")
@@ -37,11 +55,11 @@ def build_yaml_document(extracted, paper_meta, resolved_traits, gensp, lis_gene_
     if isinstance(comments, str):
         comments = [comments]
     for comment in comments:
-        clean_comment = comment.replace('"', '\\"')
+        clean_comment = strip_html_tags(comment).replace('"', '\\"')
         yaml_lines.append(f"  - \"{clean_comment}\"")
         
     synopsis = extracted.get("phenotype_synopsis") or "Characterized in publication"
-    clean_synopsis = synopsis.replace('"', '\\"')
+    clean_synopsis = strip_html_tags(synopsis).replace('"', '\\"')
     yaml_lines.append(f"phenotype_synopsis: \"{clean_synopsis}\"")
     
     yaml_lines.append("traits:")

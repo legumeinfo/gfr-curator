@@ -136,15 +136,20 @@ def format_friendly_error(err) -> str:
     cleaned = re.sub(r"^[A-Za-z0-9_]+Exception\s*-\s*", "", cleaned)
     return " ".join(cleaned.strip().split())
 
-def query_llm(abstract: str, api_key: str = None, model: str = None):
+def query_llm(abstract: str, api_key: str = None, model: str = None, full_text: str = None):
     """
-    Queries LLM to extract gene function information from a scientific paper abstract.
-    Supports automatic retries and fallback models.
+    Queries LLM to extract gene function information from a scientific paper abstract
+    and optional full-text excerpts. Supports automatic retries and fallback models.
     """
-    prompt = f"""You are an expert biocurator for the Legume Information System (LIS). Your task is to extract gene function information from the provided abstract of a scientific paper and output a structured JSON object matching the LIS Gene Function Registry schema.
+    paper_content = f"Scientific Paper Abstract:\n{abstract}"
+    if full_text:
+        # Cap full text to ~15,000 chars to avoid prompt overflow while providing crucial body details
+        capped_body = full_text[:15000] if len(full_text) > 15000 else full_text
+        paper_content += f"\n\nAdditional Open-Access Full-Text Excerpts:\n{capped_body}"
 
-Scientific Paper Abstract:
-{abstract}
+    prompt = f"""You are an expert biocurator for the Legume Information System (LIS). Your task is to extract gene function information from the provided scientific paper text and output a structured JSON object matching the LIS Gene Function Registry schema.
+
+{paper_content}
 
 Please extract the following information and output it as a valid JSON object with a "genes" array containing one object for EACH distinct gene characterized in the paper:
 
@@ -155,7 +160,7 @@ Please extract the following information and output it as a valid JSON object wi
       "classical_locus": "any classical locus name if mentioned, otherwise null",
       "gene_symbols": ["list of gene symbols for THIS specific gene, e.g. GmCIF1"],
       "gene_symbol_long": "the long-hand version of the main gene symbol acronym, e.g. Cell Wall Invertase Inhibitor 1",
-      "gene_model_pub_name": "the gene model name as listed in the publication (e.g., Glyma02g17170)",
+      "gene_model_pub_name": "the gene model name as listed in the publication (e.g., Glyma02g17170 or Glyma.17G036300)",
       "confidence": "an integer from 2 to 5 showing how strong the evidence is:
                     5 - High confidence (gene functional validation with stable transgenic lines)
                     4 - Medium-High (functional validation with transient expression, e.g. RNAi transient or VIGS, or heterologous expression with strong in vitro proof)
