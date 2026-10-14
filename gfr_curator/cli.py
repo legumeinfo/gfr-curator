@@ -42,17 +42,20 @@ def main():
     
     # Help flag
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
-        print("Usage: gfr-curate [DOI] [--model MODEL] [--key API_KEY] [--configure] [--validate FILE]")
+        print("Usage: gfr-curate [DOI] [--model MODEL] [--key API_KEY] [--no-mcp] [--mcp-url URL] [--configure] [--validate FILE]")
         print("\nOptions:")
         print("  DOI                Digital Object Identifier of the publication")
         print("  --model MODEL      LLM model identifier (e.g. gpt-4o, claude-3-5-sonnet-20241022,")
-        print("                     gemini/gemini-flash-lite-latest")
+        print("                     gemini/gemini-flash-lite-latest)")
         print("  --key API_KEY      API key for the selected model provider")
+        print("  --use-mcp          Use Legumista MCP server (default: enabled)")
+        print("  --no-mcp           Disable MCP server and run in classic direct API mode")
+        print("  --mcp-url URL      Custom Legumista MCP server endpoint (default: https://mcp.legumeinfo.org)")
         print("  --configure        Run interactive wizard to set or update default model & API credentials")
         print("  --validate FILE    Validate a YAML record draft against schema")
         print("\nConfiguration:")
         print("  Config file:       ~/.config/gfr-curator/config.env (permissions 0600)")
-        print("  Environment:       LLM_MODEL, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY")
+        print("  Environment:       LLM_MODEL, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, LEGUMISTA_MCP_URL")
         sys.exit(0)
 
     # Validate flag (offline validation does not require LLM setup)
@@ -81,6 +84,8 @@ def main():
     model = os.environ.get("LLM_MODEL") or os.environ.get("GFR_MODEL") or os.environ.get("GEMINI_MODEL")
     key_arg = None
     doi = ""
+    use_mcp = True
+    mcp_url = os.environ.get("LEGUMISTA_MCP_URL")
 
     args = sys.argv[1:]
     i = 0
@@ -101,6 +106,20 @@ def main():
                 continue
             else:
                 console.print("[bold red][!] Error: --key requires an API key.[/bold red]")
+                sys.exit(1)
+        elif arg == "--no-mcp":
+            use_mcp = False
+            i += 1
+        elif arg == "--use-mcp":
+            use_mcp = True
+            i += 1
+        elif arg == "--mcp-url":
+            if i + 1 < len(args):
+                mcp_url = args[i + 1]
+                i += 2
+                continue
+            else:
+                console.print("[bold red][!] Error: --mcp-url requires a URL.[/bold red]")
                 sys.exit(1)
         elif not arg.startswith("--") and not doi:
             doi = arg
@@ -141,7 +160,7 @@ def main():
             pass
             
     # Run the orchestrator
-    curator = GFRCurator(doi, api_key=api_key, model=model)
+    curator = GFRCurator(doi, api_key=api_key, model=model, use_mcp=use_mcp, mcp_url=mcp_url)
     curator.execute()
 
 if __name__ == "__main__":
