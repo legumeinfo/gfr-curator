@@ -42,12 +42,13 @@ def main():
     
     # Help flag
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
-        print("Usage: gfr-curate [DOI] [--model MODEL] [--key API_KEY] [--no-mcp] [--mcp-url URL] [--configure] [--validate FILE]")
+        print("Usage: gfr-curate [DOI] [--model MODEL] [--key API_KEY] [--debug] [--no-mcp] [--mcp-url URL] [--configure] [--validate FILE]")
         print("\nOptions:")
         print("  DOI                Digital Object Identifier of the publication")
         print("  --model MODEL      LLM model identifier (e.g. gpt-4o, claude-3-5-sonnet-20241022,")
         print("                     gemini/gemini-flash-lite-latest)")
         print("  --key API_KEY      API key for the selected model provider")
+        print("  --debug            Show detailed diagnostic and operational details as the program runs")
         print("  --use-mcp          Use Legumista MCP server (default: enabled)")
         print("  --no-mcp           Disable MCP server and run in classic direct API mode")
         print("  --mcp-url URL      Custom Legumista MCP server endpoint (default: https://mcp.legumeinfo.org)")
@@ -55,16 +56,18 @@ def main():
         print("  --validate FILE    Validate a YAML record draft against schema")
         print("\nConfiguration:")
         print("  Config file:       ~/.config/gfr-curator/config.env (permissions 0600)")
-        print("  Environment:       LLM_MODEL, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, LEGUMISTA_MCP_URL")
+        print("  Environment:       LLM_MODEL, GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, LEGUMISTA_MCP_URL, GFR_DEBUG")
         sys.exit(0)
 
     # Validate flag (offline validation does not require LLM setup)
     if "--validate" in sys.argv:
         from gfr_curator.validator import validate_yaml_file
         idx = sys.argv.index("--validate")
-        if idx + 1 < len(sys.argv):
-            target_file = sys.argv[idx + 1]
-            is_valid, _ = validate_yaml_file(target_file, verbose=True)
+        debug = "--debug" in sys.argv or os.environ.get("GFR_DEBUG", "").lower() in ("1", "true", "yes")
+        remaining = [a for a in sys.argv[idx + 1:] if a != "--debug"]
+        if remaining:
+            target_file = remaining[0]
+            is_valid, _ = validate_yaml_file(target_file, verbose=True, debug=debug)
             sys.exit(0 if is_valid else 1)
         else:
             console.print("[bold red][!] Error: --validate requires a path to a YAML file.[/bold red]")
@@ -86,6 +89,7 @@ def main():
     doi = ""
     use_mcp = True
     mcp_url = os.environ.get("LEGUMISTA_MCP_URL")
+    debug = "--debug" in sys.argv or os.environ.get("GFR_DEBUG", "").lower() in ("1", "true", "yes")
 
     args = sys.argv[1:]
     i = 0
@@ -107,6 +111,9 @@ def main():
             else:
                 console.print("[bold red][!] Error: --key requires an API key.[/bold red]")
                 sys.exit(1)
+        elif arg == "--debug":
+            debug = True
+            i += 1
         elif arg == "--no-mcp":
             use_mcp = False
             i += 1
@@ -160,7 +167,7 @@ def main():
             pass
             
     # Run the orchestrator
-    curator = GFRCurator(doi, api_key=api_key, model=model, use_mcp=use_mcp, mcp_url=mcp_url)
+    curator = GFRCurator(doi, api_key=api_key, model=model, use_mcp=use_mcp, mcp_url=mcp_url, debug=debug)
     curator.execute()
 
 if __name__ == "__main__":

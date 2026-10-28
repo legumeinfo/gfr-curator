@@ -4,12 +4,14 @@ import re
 import sys
 import time
 from rich.console import Console
+from rich.panel import Panel
 import litellm
 
 # Configure LiteLLM defaults
 litellm.suppress_debug_info = True
 litellm.drop_params = True
 
+console = Console()
 err_console = Console(stderr=True)
 
 def normalize_model_name(model: str) -> str:
@@ -136,7 +138,7 @@ def format_friendly_error(err) -> str:
     cleaned = re.sub(r"^[A-Za-z0-9_]+Exception\s*-\s*", "", cleaned)
     return " ".join(cleaned.strip().split())
 
-def query_llm(abstract: str, api_key: str = None, model: str = None, full_text: str = None):
+def query_llm(abstract: str, api_key: str = None, model: str = None, full_text: str = None, debug: bool = False):
     """
     Queries LLM to extract gene function information from a scientific paper abstract
     and optional full-text excerpts. Supports automatic retries and fallback models.
@@ -168,7 +170,8 @@ Please extract the following information and output it as a valid JSON object wi
                     2 - Medium-Low (gene expression correlates with trait, or mutant phenotype described in other species only)",
       "comments": ["list of 1-3 comments briefly describing THIS gene's function, regulation, and interactors"],
       "phenotype_synopsis": "brief synopsis of the phenotype for THIS gene",
-      "traits": ["list of key trait keywords to lookup for THIS gene, e.g. ['seed weight', 'sucrose metabolism']"]
+      "traits": ["list of key trait keywords to lookup for THIS gene, e.g. ['seed weight', 'sucrose metabolism']"],
+      "curation_notes": "brief notes on evidence from the text supporting this gene model, confidence score, and traits"
     }}
   ]
 }}
@@ -182,6 +185,17 @@ Make sure your response contains ONLY valid JSON without markdown formatting or 
         err_console.print("\n[bold red][!] Error: No LLM model configured.[/bold red]")
         err_console.print("[dim]Please specify a model with --model or run: [cyan]gfr-curate --configure[/cyan][/dim]\n")
         sys.exit(1)
+
+    if debug:
+        console.print(Panel(
+            f"[bold]Target Model:[/bold] {target_model}\n"
+            f"[bold]Abstract Size:[/bold] {len(abstract):,} chars\n"
+            f"[bold]Full Text Excerpt Size:[/bold] {len(capped_body) if full_text else 0:,} chars\n"
+            f"[bold]Total Prompt Size:[/bold] {len(prompt):,} chars",
+            title="[bold yellow]Debug: LLM Prompt Context[/bold yellow]",
+            border_style="yellow",
+            expand=False
+        ))
 
     # Set provider-specific env var if needed for LiteLLM
     if api_key:
@@ -202,9 +216,54 @@ Make sure your response contains ONLY valid JSON without markdown formatting or 
             }
             if api_key:
                 kwargs["api_key"] = api_key
+
+            t0 = time.time()
             response = litellm.completion(**kwargs)
-            content = response.choices[0].message.content
-            return parse_llm_json_response(content)
+            elapsed = time.time() - t0
+
+            first_choice = response.choices[0] if getattr(response, "choices", None) else None
+            msg = getattr(first_choice, "message", None) if first_choice else None
+            content = getattr(msg, "content", "") if msg else ""
+
+            if debug:
+                usage = getattr(response, "usage", None)
+                usage_info = ""
+                if usage:
+                    prompt_toks = getattr(usage, "prompt_tokens", None)
+                    comp_toks = getattr(usage, "completion_tokens", None)
+                    tot_toks = getattr(usage, "total_tokens", None)
+                    details = getattr(usage, "completion_tokens_details", None)
+                    reasoning_toks = getattr(details, "reasoning_tokens", None) if details else None
+                    usage_info = f" | Tokens: prompt={prompt_toks}, completion={comp_toks}, total={tot_toks}"
+                    if reasoning_toks:
+                        usage_info += f", reasoning={reasoning_toks}"
+                console.print(f"[dim yellow][DEBUG] LLM response received in {elapsed:.2f}s{usage_info}[/dim yellow]")
+
+                # Inspect for native reasoning tokens (DeepSeek-R1, Gemini Thinking, Claude, o1/o3)
+                native_reasoning = getattr(msg, "reasoning_content", None) or getattr(msg, "thought", None)
+                if isinstance(native_reasoning, str) and native_reasoning.strip():
+                    console.print(Panel(
+                        native_reasoning.strip(),
+                        title="[bold cyan]Debug: Model Reasoning Output[/bold cyan]",
+                        border_style="cyan",
+                        expand=False
+                    ))
+
+                # Show response text preview
+                raw_preview = content.strip()
+                if len(raw_preview) > 800:
+                    raw_preview = raw_preview[:800] + "\n... [truncated preview]"
+                console.print(Panel(
+                    raw_preview,
+                    title="[bold yellow]Debug: Raw JSON Response[/bold yellow]",
+                    border_style="yellow",
+                    expand=False
+                ))
+
+            parsed = parse_llm_json_response(content)
+            if debug:
+                console.print(f"[dim yellow][DEBUG] Successfully parsed {len(parsed)} gene record(s) from LLM output.[/dim yellow]")
+            return parsed
         except Exception as e:
             last_error = e
             friendly_err = format_friendly_error(e)
@@ -218,9 +277,9 @@ Make sure your response contains ONLY valid JSON without markdown formatting or 
     err_console.print("[dim]Tip: You can reconfigure your model anytime with: [cyan]gfr-curate --configure[/cyan][/dim]\n")
     sys.exit(1)
 
-def query_gemini_api(api_key, abstract, model_override=None):
+def query_gemini_api(api_key, abstract, model_override=None, debug: bool = False):
     """
     Backwards-compatible wrapper calling query_llm.
     """
-    return query_llm(abstract=abstract, api_key=api_key, model=model_override or "gemini/gemini-flash-lite-latest")
+    return query_llm(abstract=abstract, api_key=api_key, model=model_override or "gemini/gemini-flash-lite-latest", debug=debug)
 

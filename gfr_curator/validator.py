@@ -91,7 +91,7 @@ def validate_yaml_string(yaml_content, schema=None):
         
     return overall_valid, results
 
-def validate_yaml_file(file_path, schema_path=None, out_console=None, verbose=True):
+def validate_yaml_file(file_path, schema_path=None, out_console=None, verbose=True, debug=False):
     """
     Validates all documents in a YAML file against schema.json.
     Outputs rich formatting and returns (is_valid, results).
@@ -104,6 +104,9 @@ def validate_yaml_file(file_path, schema_path=None, out_console=None, verbose=Tr
         return False, [{"doc_index": 0, "is_valid": False, "errors": [f"File not found: {file_path}"]}]
         
     try:
+        resolved_schema_path = schema_path or get_default_schema_path()
+        if debug:
+            c.print(f"[dim yellow][DEBUG] Loading schema from: {resolved_schema_path}[/dim yellow]")
         schema = load_schema(schema_path)
     except Exception as e:
         if verbose:
@@ -118,6 +121,9 @@ def validate_yaml_file(file_path, schema_path=None, out_console=None, verbose=Tr
         yaml_content = f.read()
         
     is_valid, results = validate_yaml_string(yaml_content, schema=schema)
+    
+    if debug:
+        c.print(f"[dim yellow][DEBUG] Found {len(results)} YAML document(s) to validate.[/dim yellow]")
     
     if verbose:
         if not results:
@@ -151,21 +157,23 @@ def validate_yaml_file(file_path, schema_path=None, out_console=None, verbose=Tr
 def main():
     """
     CLI runner for stand-alone validation.
-    Usage: gfr-validate <path_to_yaml> [--schema <path_to_schema>]
+    Usage: gfr-validate <path_to_yaml> [--schema <path_to_schema>] [--debug]
     """
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        console.print("Usage: [bold green]gfr-validate[/bold green] <path_to_yaml_file> [--schema <path_to_schema.json>]")
+    if len(sys.argv) < 2 or any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        console.print("Usage: [bold green]gfr-validate[/bold green] <path_to_yaml_file> [--schema <path_to_schema.json>] [--debug]")
         console.print("Example: gfr-validate glyma.Tang_Su_2017.yml")
         sys.exit(0)
         
-    yaml_file = sys.argv[1]
+    debug = "--debug" in sys.argv
+    clean_args = [a for a in sys.argv[1:] if a != "--debug"]
+    yaml_file = clean_args[0] if clean_args else ""
     schema_file = None
-    if "--schema" in sys.argv:
-        s_idx = sys.argv.index("--schema")
-        if s_idx + 1 < len(sys.argv):
-            schema_file = sys.argv[s_idx + 1]
+    if "--schema" in clean_args:
+        s_idx = clean_args.index("--schema")
+        if s_idx + 1 < len(clean_args):
+            schema_file = clean_args[s_idx + 1]
             
-    is_valid, _ = validate_yaml_file(yaml_file, schema_path=schema_file, verbose=True)
+    is_valid, _ = validate_yaml_file(yaml_file, schema_path=schema_file, verbose=True, debug=debug)
     sys.exit(0 if is_valid else 1)
 
 if __name__ == "__main__":

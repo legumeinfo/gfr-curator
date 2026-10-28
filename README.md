@@ -87,6 +87,16 @@ gfr-curate 10.1093/jxb/erw425 --model ollama/llama3
 gfr-curate 10.1093/jxb/erw425 --model gpt-4o --key <api-key>
 ```
 
+### Debug Mode
+
+Pass `--debug` to print the details of each step.
+
+```bash
+gfr-curate 10.1093/jxb/erw425 --debug
+```
+
+Debug mode can also be activated by setting the environment variable `GFR_DEBUG=1`.
+
 ### Validate Records
 
 Validate YAML records against `schema.json`:
