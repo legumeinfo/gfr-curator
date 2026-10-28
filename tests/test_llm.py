@@ -57,6 +57,26 @@ class TestLLM(unittest.TestCase):
         self.assertEqual(call_kwargs["api_key"], "test-key")
 
     @patch("gfr_curator.llm.litellm.completion")
+    def test_query_llm_debug_mode(self, mock_completion):
+        mock_response = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.content = '[{"gene_symbols": ["GmCIF1"], "scientific_name": "Glycine max", "reasoning": "Identified GmCIF1 based on functional assay"}]'
+        mock_msg.reasoning_content = "Analysis indicates GmCIF1 is the primary gene."
+        mock_response.choices = [MagicMock(message=mock_msg)]
+        mock_usage = MagicMock()
+        mock_usage.prompt_tokens = 120
+        mock_usage.completion_tokens = 45
+        mock_usage.total_tokens = 165
+        mock_usage.completion_tokens_details = MagicMock(reasoning_tokens=20)
+        mock_response.usage = mock_usage
+        mock_completion.return_value = mock_response
+
+        res = query_llm("abstract text", api_key="test-key", model="gpt-4o", debug=True)
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["gene_symbols"], ["GmCIF1"])
+        self.assertEqual(res[0]["reasoning"], "Identified GmCIF1 based on functional assay")
+
+    @patch("gfr_curator.llm.litellm.completion")
     def test_query_gemini_api_backwards_compatible(self, mock_completion):
         mock_response = MagicMock()
         mock_response.choices = [

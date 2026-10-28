@@ -84,6 +84,20 @@ class TestGFRCurator(unittest.TestCase):
         is_valid, results = validate_yaml_string(yaml_content)
         self.assertTrue(is_valid, f"Validation failed: {results}")
 
+    def test_gfr_curator_debug_flag(self):
+        from gfr_curator.curator import GFRCurator
+        curator = GFRCurator("10.1234/example", debug=True)
+        self.assertTrue(curator.debug)
+        curator_default = GFRCurator("10.1234/example")
+        self.assertFalse(curator_default.debug)
+
+    def test_gfr_curator_debug_helpers_call(self):
+        from gfr_curator.curator import GFRCurator
+        curator = GFRCurator("10.1234/example", debug=True)
+        # Should not raise exception
+        curator._debug_msg("Testing debug message")
+        curator._debug_panel("Testing debug content", "Debug: Unit Test")
+
 if __name__ == "__main__":
     unittest.main()
 
