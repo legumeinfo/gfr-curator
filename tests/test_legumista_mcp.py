@@ -91,5 +91,31 @@ Cell wall invertase plays multiple functions in plant growth.
         res = self.client.verify_ids("test")
         self.assertIn("2 FOUND", res)
 
+    @patch.object(LegumistaMCPClient, 'call_tool')
+    def test_read_paper_pagination(self, mock_call):
+        chunk1 = "[pages 1–3 of 10]\nPage 1 intro\n[stopped before page 4 to stay under 20,000 characters — continue with start_page=4]"
+        chunk2 = "[pages 4–6 of 10]\nPage 4 results\n[stopped before page 7 to stay under 20,000 characters — continue with start_page=7]"
+        chunk3 = "[pages 7–10 of 10]\nPage 7 discussion"
+        mock_call.side_effect = [
+            {"content": [{"type": "text", "text": chunk1}]},
+            {"content": [{"type": "text", "text": chunk2}]},
+            {"content": [{"type": "text", "text": chunk3}]}
+        ]
+
+        text = self.client.read_paper("10.1038/sample-doi")
+        self.assertIsNotNone(text)
+        self.assertIn("Page 1 intro", text)
+        self.assertIn("Page 4 results", text)
+        self.assertIn("Page 7 discussion", text)
+        self.assertEqual(mock_call.call_count, 3)
+
+    @patch.object(LegumistaMCPClient, 'call_tool')
+    def test_read_paper_not_available(self, mock_call):
+        mock_call.return_value = {
+            "content": [{"type": "text", "text": "No open-access PDF is listed for this DOI."}]
+        }
+        text = self.client.read_paper("10.1038/closed-access")
+        self.assertIsNone(text)
+
 if __name__ == '__main__':
     unittest.main()

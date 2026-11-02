@@ -76,6 +76,13 @@ def parse_llm_json_response(content: str):
 
     valid_records = [r for r in records if is_gene_dict(r)]
     if not valid_records:
+        # Check if the LLM explicitly returned an empty array of genes
+        if isinstance(data, dict):
+            for key in ("genes", "records", "data", "results", "gene_list", "extracted_genes", "gene_records"):
+                if key in data and isinstance(data[key], list) and len(data[key]) == 0:
+                    return []
+        elif isinstance(data, list) and len(data) == 0:
+            return []
         raise ValueError(f"LLM response did not contain valid gene records: {text[:200]}")
     return valid_records
 
@@ -145,8 +152,9 @@ def query_llm(abstract: str, api_key: str = None, model: str = None, full_text: 
     """
     paper_content = f"Scientific Paper Abstract:\n{abstract}"
     if full_text:
-        # Cap full text to ~15,000 chars to avoid prompt overflow while providing crucial body details
-        capped_body = full_text[:15000] if len(full_text) > 15000 else full_text
+        # Cap full text to ~120,000 chars (~30,000 tokens) to ensure full Results and candidate gene
+        # sections are preserved while avoiding extreme prompt overflow on older models
+        capped_body = full_text[:120000] if len(full_text) > 120000 else full_text
         paper_content += f"\n\nAdditional Open-Access Full-Text Excerpts:\n{capped_body}"
 
     prompt = f"""You are an expert biocurator for the Legume Information System (LIS). Your task is to extract gene function information from the provided scientific paper text and output a structured JSON object matching the LIS Gene Function Registry schema.
@@ -212,7 +220,7 @@ Make sure your response contains ONLY valid JSON without markdown formatting or 
                 "model": target_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": {"type": "json_object"},
-                "timeout": 60,
+                "timeout": 120,
             }
             if api_key:
                 kwargs["api_key"] = api_key

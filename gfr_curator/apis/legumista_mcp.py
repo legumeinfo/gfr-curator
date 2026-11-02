@@ -284,26 +284,49 @@ class LegumistaMCPClient:
             err_console.print(f"[dim yellow][!] openalex_by_doi lookup failed: {e}[/dim yellow]")
             return None
 
-    def read_paper(self, doi: str) -> Optional[str]:
+    def read_paper(self, doi: str, max_chunks: int = 8) -> Optional[str]:
         """
         Retrieves open-access full-text paper contents using Legumista's read_paper tool.
+        Follows pagination cues (e.g. 'continue with start_page=N') to fetch complete multi-page articles.
         Returns full text or None if paper is not open-access or fetch fails.
         """
         try:
-            res = self.call_tool("read_paper", {"doi": doi})
-            text = res.get("content", [{}])[0].get("text", "")
-            if not text or not text.strip():
+            chunks = []
+            start_page = 1
+            while len(chunks) < max_chunks:
+                args: Dict[str, Any] = {"doi": doi}
+                if start_page > 1:
+                    args["start_page"] = start_page
+                res = self.call_tool("read_paper", args)
+                text = res.get("content", [{}])[0].get("text", "")
+                if not text or not text.strip():
+                    break
+                clean_lower = text.lower().strip()
+                if (
+                    clean_lower.startswith("error:")
+                    or "failed:" in clean_lower
+                    or "no open-access pdf is listed" in clean_lower
+                    or "no open-access" in clean_lower
+                    or (len(clean_lower) < 300 and ("not available" in clean_lower or "read the abstract" in clean_lower))
+                ):
+                    if not chunks:
+                        return None
+                    break
+
+                chunks.append(text)
+
+                m = re.search(r"continue with start_page=(\d+)", text)
+                if m:
+                    next_page = int(m.group(1))
+                    if next_page <= start_page:
+                        break
+                    start_page = next_page
+                else:
+                    break
+
+            if not chunks:
                 return None
-            clean_lower = text.lower().strip()
-            if (
-                clean_lower.startswith("error:")
-                or "failed:" in clean_lower
-                or "no open-access pdf is listed" in clean_lower
-                or "no open-access" in clean_lower
-                or (len(clean_lower) < 300 and ("not available" in clean_lower or "read the abstract" in clean_lower))
-            ):
-                return None
-            return text
+            return "\n\n".join(chunks)
         except Exception as e:
             err_console.print(f"[dim yellow][!] read_paper fetch failed: {e}[/dim yellow]")
             return None

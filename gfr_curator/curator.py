@@ -222,6 +222,11 @@ class GFRCurator:
         if isinstance(extracted_list, dict):
             extracted_list = [extracted_list]
 
+        if not extracted_list:
+            console.print("\n[bold yellow][!] No curatable gene function records were identified for this paper.[/bold yellow]")
+            console.print("[dim]The publication may be a genome assembly, review, methodology, or does not characterize specific gene models or functional phenotypes.[/dim]\n")
+            return None
+
         self._debug_msg(f"Extracted {len(extracted_list)} gene entity candidate(s) from LLM output.")
 
         all_yaml_contents = []

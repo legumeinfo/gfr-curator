@@ -41,10 +41,21 @@ def build_yaml_document(extracted, paper_meta, resolved_traits, gensp, lis_gene_
     if not lis_gene_id or "TODO" in lis_gene_id:
         clean_sym = re.sub(r"[^\w-]", "", str(symbols[0] if symbols else "RESOLVE_LIS_ID"))
         target_name = (strip_html_tags(pub_name) if (pub_name and pub_name != "~") else clean_sym) or "RESOLVE_LIS_ID"
+        target_name = re.sub(r"[^\w.-]", "", str(target_name)).strip(".")
+        if not target_name:
+            target_name = "RESOLVE_LIS_ID"
         lis_gene_id = f"{gensp}.TODO.TODO.{target_name}"
 
     yaml_lines.append(f"gene_model_full_id: {lis_gene_id}")
     conf = extracted.get("confidence", 3)
+    try:
+        conf = int(conf)
+        if conf < 2:
+            conf = 2
+        elif conf > 5:
+            conf = 5
+    except (ValueError, TypeError):
+        conf = 3
     yaml_lines.append(f"confidence: {conf}")
     
     yaml_lines.append("curators:")

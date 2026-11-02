@@ -40,6 +40,11 @@ class TestLLM(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_llm_json_response("")
 
+    def test_parse_llm_json_response_empty_genes_array(self):
+        raw = '{"genes": []}'
+        res = parse_llm_json_response(raw)
+        self.assertEqual(res, [])
+
     @patch("gfr_curator.llm.litellm.completion")
     def test_query_llm_success(self, mock_completion):
         mock_response = MagicMock()
