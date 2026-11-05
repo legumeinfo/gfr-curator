@@ -98,6 +98,76 @@ class TestGFRCurator(unittest.TestCase):
         curator._debug_msg("Testing debug message")
         curator._debug_panel("Testing debug content", "Debug: Unit Test")
 
+    def test_gfr_curator_pdf_path_initialization(self):
+        import os
+        from gfr_curator.curator import GFRCurator
+        curator = GFRCurator("10.1234/example", pdf_path="paper.pdf")
+        self.assertEqual(curator.pdf_path, os.path.abspath("paper.pdf"))
+
+    def test_gfr_curator_pdf_skips_mcp_read_paper(self):
+        from unittest.mock import patch, MagicMock
+        from gfr_curator.curator import GFRCurator
+
+        curator = GFRCurator("10.1234/example", pdf_path="paper.pdf", use_mcp=True)
+
+        with patch("os.path.isfile", return_value=True), \
+             patch("gfr_curator.curator.extract_text_from_pdf", return_value="Local PDF paper text") as mock_extract, \
+             patch("gfr_curator.curator.LegumistaMCPClient") as mock_mcp_cls, \
+             patch("gfr_curator.curator.fetch_ncbi_metadata", return_value={
+                 "title": "Sample Paper", "citation": "Author, 2024", "year": "2024", "pmid": "123", "doi": "10.1234/example", "abstract": "Abstract text"
+             }), \
+             patch("gfr_curator.curator.query_llm", return_value=[]) as mock_query_llm:
+
+            mock_mcp_instance = MagicMock()
+            mock_mcp_instance.is_healthy.return_value = True
+            mock_mcp_cls.return_value = mock_mcp_instance
+
+            curator.execute()
+
+            mock_extract.assert_called_once_with(curator.pdf_path)
+            # read_paper should NEVER be called when a local PDF is provided
+            mock_mcp_instance.read_paper.assert_not_called()
+            # query_llm should be called with full_text="Local PDF paper text"
+            self.assertEqual(mock_query_llm.call_args[1].get("full_text"), "Local PDF paper text")
+
+    def _run_pdf_doi_detection(self, doi, detected):
+        from unittest.mock import patch
+        from gfr_curator.curator import GFRCurator
+
+        curator = GFRCurator(doi, pdf_path="paper.pdf", use_mcp=False)
+        with patch("os.path.isfile", return_value=True), \
+             patch("gfr_curator.curator.extract_doi_from_pdf", return_value=detected), \
+             patch("gfr_curator.curator.extract_text_from_pdf", return_value="text"), \
+             patch("gfr_curator.curator.fetch_ncbi_metadata", return_value={
+                 "title": "T", "citation": "A, 2024", "year": "2024", "pmid": "1", "doi": "x", "abstract": "abs"
+             }), \
+             patch("gfr_curator.curator.query_llm", return_value=[]), \
+             patch("gfr_curator.curator.console.print") as mock_print:
+            curator.execute()
+        printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list if c.args)
+        return curator, printed
+
+    def test_pdf_doi_detected_when_not_provided(self):
+        curator, printed = self._run_pdf_doi_detection(None, "10.1038/detected")
+        self.assertEqual(curator.doi, "10.1038/detected")
+        self.assertIn("Detected DOI from PDF", printed)
+        self.assertIn("10.1038/detected", printed)
+
+    def test_pdf_doi_printed_and_mismatch_warned_when_provided(self):
+        curator, printed = self._run_pdf_doi_detection("10.1234/provided", "10.1038/detected")
+        self.assertEqual(curator.doi, "10.1234/provided")
+        self.assertIn("10.1038/detected", printed)
+        self.assertIn("differs from the DOI detected", printed)
+
+    def test_pdf_doi_match_is_case_insensitive(self):
+        curator, printed = self._run_pdf_doi_detection("10.1038/S41588-026-02577-Z", "10.1038/s41588-026-02577-z")
+        self.assertNotIn("differs from the DOI detected", printed)
+
+    def test_pdf_without_doi_and_none_provided_exits(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._run_pdf_doi_detection(None, None)
+        self.assertEqual(cm.exception.code, 1)
+
 if __name__ == "__main__":
     unittest.main()
 

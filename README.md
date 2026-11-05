@@ -46,6 +46,18 @@ Or run without arguments to enter the DOI interactively:
 gfr-curate
 ```
 
+#### Curate using a Local PDF
+
+You can point `gfr-curate` to a local PDF file using `--pdf` or by passing the PDF file path. The tool extracts text from the local PDF instead of attempting to fetch the paper full text from the web:
+
+```bash
+# Provide DOI and local PDF
+gfr-curate 10.1038/s41588-026-02577-z --pdf 41588_2026_Article_2577.pdf
+
+# Or pass the PDF path directly (DOI is automatically detected from the PDF)
+gfr-curate 41588_2026_Article_2577.pdf
+```
+
 Draft YAML files are written to the current working directory and checked against `schema.json`.
 
 ### Legumista

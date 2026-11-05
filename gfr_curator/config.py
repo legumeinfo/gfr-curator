@@ -1,18 +1,14 @@
+import json
 import os
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
-
-MODEL_CHOICES = [
-    ("gemini/gemini-flash-lite-latest", "free tier"),
-    ("gpt-4o-mini", ""),
-    ("claude-3-5-sonnet-20241022", ""),
-    ("ollama/llama3", "local"),
-]
 
 def get_config_dir() -> Path:
     """Returns the user configuration directory path."""
@@ -127,6 +123,91 @@ def is_configured() -> bool:
     data = read_config_dict()
     return bool(data.get("LLM_MODEL") or any(k.endswith("_KEY") for k in data))
 
+DEFAULT_OPENROUTER_MODELS = [
+    "openrouter/~deepseek/deepseek-flash-latest",
+    "openrouter/~deepseek/deepseek-pro-latest",
+    "openrouter/deepseek/deepseek-chat",
+    "openrouter/deepseek/deepseek-r1",
+    "openrouter/anthropic/claude-3.7-sonnet",
+    "openrouter/anthropic/claude-3.5-sonnet",
+    "openrouter/anthropic/claude-3.5-haiku",
+    "openrouter/google/gemini-2.5-flash",
+    "openrouter/google/gemini-2.5-pro",
+    "openrouter/google/gemini-flash-1.5",
+    "openrouter/openai/gpt-4o",
+    "openrouter/openai/gpt-4o-mini",
+    "openrouter/openai/o3-mini",
+    "openrouter/meta-llama/llama-3.3-70b-instruct",
+    "openrouter/meta-llama/llama-3.1-8b-instruct",
+    "openrouter/meta-llama/llama-3.1-70b-instruct",
+    "openrouter/qwen/qwen-2.5-72b-instruct",
+    "openrouter/mistralai/mistral-large-2411",
+    "openrouter/mistralai/mistral-small-24b-instruct-2501",
+]
+
+def get_openrouter_models(timeout: float = 1.5) -> list:
+    """
+    Returns a list of OpenRouter chat models, using local cache or fetching from OpenRouter API.
+    Falls back to a curated list of popular models if unreachable or offline.
+    """
+    cache_file = get_config_dir() / "openrouter_models.json"
+    cache_ttl = 7 * 86400  # 7 days
+
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            if isinstance(cached, dict) and time.time() - cached.get("timestamp", 0) < cache_ttl:
+                models = cached.get("models")
+                if models and isinstance(models, list):
+                    return models
+        except Exception:
+            pass
+
+    # Try fetching dynamically from OpenRouter public API
+    try:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/models",
+            headers={"User-Agent": "gfr-curator"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        models = []
+        for item in data.get("data", []):
+            m_id = item.get("id")
+            if not m_id:
+                continue
+            endpoints = item.get("endpoints") or []
+            if endpoints and "/api/v1/chat/completions" not in endpoints:
+                continue
+            formatted = m_id if m_id.startswith("openrouter/") else f"openrouter/{m_id}"
+            models.append(formatted)
+
+        if models:
+            try:
+                get_config_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump({"timestamp": time.time(), "models": models}, f)
+            except Exception:
+                pass
+            return models
+    except Exception:
+        pass
+
+    # Fallback to expired cache if available
+    if cache_file.exists():
+        try:
+            with open(cache_file, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+            models = cached.get("models")
+            if models and isinstance(models, list):
+                return models
+        except Exception:
+            pass
+
+    return list(DEFAULT_OPENROUTER_MODELS)
+
 def get_all_known_models() -> list:
     """
     Returns a deduplicated list of chat models dynamically pulled from LiteLLM's registry,
@@ -134,12 +215,6 @@ def get_all_known_models() -> list:
     """
     seen = set()
     models = []
-
-    # Include default quick-pick choices first
-    for m, _ in MODEL_CHOICES:
-        if m not in seen:
-            seen.add(m)
-            models.append(m)
 
     primary_providers = [
         "gemini",
@@ -201,6 +276,37 @@ def get_all_known_models() -> list:
                         seen.add(formatted)
                         prov_models.append(formatted)
 
+            if prov == "anthropic":
+                for am in [
+                    "claude-3-7-sonnet-20250219",
+                    "claude-3-5-sonnet-20241022",
+                    "claude-3-5-haiku-20241022",
+                    "claude-3-opus-20240229",
+                ]:
+                    if am not in seen:
+                        seen.add(am)
+                        prov_models.append(am)
+
+            if prov == "ollama":
+                for om in [
+                    "ollama/llama3",
+                    "ollama/llama3.1",
+                    "ollama/llama3.2",
+                    "ollama/llama3.3",
+                    "ollama/deepseek-r1",
+                    "ollama/qwen2.5",
+                    "ollama/mistral",
+                ]:
+                    if om not in seen:
+                        seen.add(om)
+                        prov_models.append(om)
+
+            if prov == "openrouter":
+                for om in get_openrouter_models():
+                    if is_desirable_chat(om) and om not in seen:
+                        seen.add(om)
+                        prov_models.append(om)
+
             prov_models.sort(key=model_sort_key)
             models.extend(prov_models)
 
@@ -225,6 +331,20 @@ def get_all_known_models() -> list:
 
     except Exception:
         pass
+
+    if not models:
+        models = [
+            "gemini/gemini-flash-lite-latest",
+            "gemini/gemini-2.5-flash",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "claude-3-5-sonnet-20241022",
+            "deepseek/deepseek-chat",
+            "ollama/llama3",
+            "openrouter/~deepseek/deepseek-flash-latest",
+            "openrouter/deepseek/deepseek-chat",
+            "openrouter/anthropic/claude-3.5-sonnet",
+        ]
 
     return models
 
@@ -290,7 +410,7 @@ class ModelCompleter(Completer):
                 if count >= 25:
                     return
 
-def _prompt_toolkit_select(all_models: list, initial_query: str = "") -> str:
+def _prompt_toolkit_select(all_models: list, initial_query: str = "", current_model: str = "") -> str:
     """Invokes prompt_toolkit interactive prompt with live dropdown completion."""
     from prompt_toolkit.shortcuts import prompt as pt_prompt, CompleteStyle
     from prompt_toolkit.styles import Style
@@ -343,9 +463,10 @@ def _prompt_toolkit_select(all_models: list, initial_query: str = "") -> str:
     })
 
     completer = ModelCompleter(all_models)
+    prompt_str = f"Search model (default: {current_model}): " if current_model else "Search model: "
 
     return pt_prompt(
-        "Search model: ",
+        prompt_str,
         default=initial_query,
         completer=completer,
         complete_while_typing=True,
@@ -361,10 +482,14 @@ def search_and_select_model(current_model="gemini/gemini-flash-lite-latest", out
     """
     c = out_console or console
     all_models = get_all_known_models()
+    if current_model:
+        if current_model in all_models:
+            all_models.remove(current_model)
+        all_models.insert(0, current_model)
 
     if sys.stdin.isatty():
         try:
-            selected = _prompt_toolkit_select(all_models, initial_query)
+            selected = _prompt_toolkit_select(all_models, initial_query=initial_query, current_model=current_model)
             if not selected:
                 return current_model
 
@@ -377,16 +502,17 @@ def search_and_select_model(current_model="gemini/gemini-flash-lite-latest", out
             return selected
 
         except (KeyboardInterrupt, EOFError):
-            return current_model
+            raise
         except Exception as e:
             c.print(f"[dim](Interactive dropdown unavailable: {e})[/dim]")
 
     # Non-interactive fallback
     try:
-        query = c.input(f"Enter model name (default: {current_model}): ").strip()
+        prompt_str = f"Search model (default: {current_model}): " if current_model else "Search model: "
+        query = c.input(prompt_str).strip()
         return query if query else current_model
     except (KeyboardInterrupt, EOFError):
-        return current_model
+        raise
 
 def prompt_masked_key(prompt_text: str, out_console=None) -> str:
     """
@@ -421,43 +547,12 @@ def run_configurator(out_console=None, is_initial=False):
         c.print()
 
     # 1. Model Selection
-    c.print("[bold]Select model:[/bold]")
-    for idx, (m_id, m_desc) in enumerate(MODEL_CHOICES, 1):
-        desc = f" [dim]({m_desc})[/dim]" if m_desc else ""
-        marker = " [green](current)[/green]" if m_id == current_model and not is_initial else ""
-        c.print(f"  [cyan][{idx}][/cyan] {m_id}{desc}{marker}")
-    c.print(f"  [cyan][{len(MODEL_CHOICES) + 1}][/cyan] Search all models...\n")
-
-    default_choice = "1"
-    for idx, (m_id, _) in enumerate(MODEL_CHOICES, 1):
-        if m_id == current_model:
-            default_choice = str(idx)
-            break
-
+    c.print("[bold]Select model:[/bold] [dim](type to search, ↑/↓ to navigate, Enter to select)[/dim]")
     try:
-        selection = c.input(f"Choose model [1-{len(MODEL_CHOICES) + 1}] (default: {default_choice}): ").strip()
+        chosen_model = search_and_select_model(current_model=current_model, out_console=c)
     except (KeyboardInterrupt, EOFError):
         c.print("\nCancelled.")
         sys.exit(1)
-
-    if not selection:
-        selection = default_choice
-
-    chosen_model = None
-    if selection.isdigit():
-        idx_val = int(selection)
-        if 1 <= idx_val <= len(MODEL_CHOICES):
-            chosen_model = MODEL_CHOICES[idx_val - 1][0]
-        elif idx_val == len(MODEL_CHOICES) + 1:
-            chosen_model = search_and_select_model(current_model=current_model, out_console=c)
-    elif selection.lower() in ("search", "other", "s"):
-        chosen_model = search_and_select_model(current_model=current_model, out_console=c)
-    else:
-        all_models = get_all_known_models()
-        if selection in all_models:
-            chosen_model = selection
-        else:
-            chosen_model = search_and_select_model(current_model=current_model, out_console=c, initial_query=selection)
 
     if not chosen_model:
         chosen_model = current_model or "gemini/gemini-flash-lite-latest"

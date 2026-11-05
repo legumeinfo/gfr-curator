@@ -150,12 +150,21 @@ def query_llm(abstract: str, api_key: str = None, model: str = None, full_text: 
     Queries LLM to extract gene function information from a scientific paper abstract
     and optional full-text excerpts. Supports automatic retries and fallback models.
     """
-    paper_content = f"Scientific Paper Abstract:\n{abstract}"
+    capped_body = ""
     if full_text:
         # Cap full text to ~120,000 chars (~30,000 tokens) to ensure full Results and candidate gene
         # sections are preserved while avoiding extreme prompt overflow on older models
         capped_body = full_text[:120000] if len(full_text) > 120000 else full_text
-        paper_content += f"\n\nAdditional Open-Access Full-Text Excerpts:\n{capped_body}"
+
+    clean_abstract = (abstract or "").strip()
+    if clean_abstract and capped_body:
+        paper_content = f"Scientific Paper Abstract:\n{clean_abstract}\n\nAdditional Full-Text Excerpts:\n{capped_body}"
+    elif clean_abstract:
+        paper_content = f"Scientific Paper Abstract:\n{clean_abstract}"
+    elif capped_body:
+        paper_content = f"Scientific Paper Full-Text:\n{capped_body}"
+    else:
+        paper_content = "Scientific Paper Content: None provided."
 
     prompt = f"""You are an expert biocurator for the Legume Information System (LIS). Your task is to extract gene function information from the provided scientific paper text and output a structured JSON object matching the LIS Gene Function Registry schema.
 
@@ -197,8 +206,8 @@ Make sure your response contains ONLY valid JSON without markdown formatting or 
     if debug:
         console.print(Panel(
             f"[bold]Target Model:[/bold] {target_model}\n"
-            f"[bold]Abstract Size:[/bold] {len(abstract):,} chars\n"
-            f"[bold]Full Text Excerpt Size:[/bold] {len(capped_body) if full_text else 0:,} chars\n"
+            f"[bold]Abstract Size:[/bold] {len(clean_abstract):,} chars\n"
+            f"[bold]Full Text Excerpt Size:[/bold] {len(capped_body):,} chars\n"
             f"[bold]Total Prompt Size:[/bold] {len(prompt):,} chars",
             title="[bold yellow]Debug: LLM Prompt Context[/bold yellow]",
             border_style="yellow",

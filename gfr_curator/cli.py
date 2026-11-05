@@ -42,9 +42,10 @@ def main():
     
     # Help flag
     if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
-        print("Usage: gfr-curate [DOI] [--model MODEL] [--key API_KEY] [--debug] [--no-mcp] [--mcp-url URL] [--configure] [--validate FILE]")
+        print("Usage: gfr-curate [DOI or PDF] [--pdf PATH] [--model MODEL] [--key API_KEY] [--debug] [--no-mcp] [--mcp-url URL] [--configure] [--validate FILE]")
         print("\nOptions:")
         print("  DOI                Digital Object Identifier of the publication")
+        print("  --pdf PATH         Path to a local PDF file to use instead of fetching full text from the web")
         print("  --model MODEL      LLM model identifier (e.g. gpt-4o, claude-3-5-sonnet-20241022,")
         print("                     gemini/gemini-flash-lite-latest)")
         print("  --key API_KEY      API key for the selected model provider")
@@ -87,6 +88,7 @@ def main():
     model = os.environ.get("LLM_MODEL") or os.environ.get("GFR_MODEL") or os.environ.get("GEMINI_MODEL")
     key_arg = None
     doi = ""
+    pdf_path = None
     use_mcp = True
     mcp_url = os.environ.get("LEGUMISTA_MCP_URL")
     debug = "--debug" in sys.argv or os.environ.get("GFR_DEBUG", "").lower() in ("1", "true", "yes")
@@ -111,6 +113,14 @@ def main():
             else:
                 console.print("[bold red][!] Error: --key requires an API key.[/bold red]")
                 sys.exit(1)
+        elif arg == "--pdf":
+            if i + 1 < len(args):
+                pdf_path = args[i + 1]
+                i += 2
+                continue
+            else:
+                console.print("[bold red][!] Error: --pdf requires a file path.[/bold red]")
+                sys.exit(1)
         elif arg == "--debug":
             debug = True
             i += 1
@@ -128,13 +138,20 @@ def main():
             else:
                 console.print("[bold red][!] Error: --mcp-url requires a URL.[/bold red]")
                 sys.exit(1)
-        elif not arg.startswith("--") and not doi:
-            doi = arg
-            i += 1
+        elif not arg.startswith("--"):
+            if not pdf_path and (arg.lower().endswith(".pdf") or (os.path.isfile(arg) and not arg.startswith("10."))):
+                pdf_path = arg
+                i += 1
+            elif not doi:
+                doi = arg
+                i += 1
+            else:
+                i += 1
         else:
             i += 1
-            
-    if not doi:
+
+    # With a local PDF, GFRCurator validates the file and detects the DOI from it
+    if not doi and not pdf_path:
         try:
             doi = console.input("\n[bold yellow]Enter the DOI of the paper to curate:[/bold yellow] ").strip()
         except KeyboardInterrupt:
@@ -167,7 +184,7 @@ def main():
             pass
             
     # Run the orchestrator
-    curator = GFRCurator(doi, api_key=api_key, model=model, use_mcp=use_mcp, mcp_url=mcp_url, debug=debug)
+    curator = GFRCurator(doi, api_key=api_key, model=model, use_mcp=use_mcp, mcp_url=mcp_url, debug=debug, pdf_path=pdf_path)
     curator.execute()
 
 if __name__ == "__main__":

@@ -13,7 +13,48 @@ class TestCLI(unittest.TestCase):
             self.assertEqual(cm.exception.code, 0)
             output = mock_stdout.getvalue()
             self.assertIn("--debug", output)
+            self.assertIn("--pdf PATH", output)
             self.assertIn("Show detailed diagnostic and operational details", output)
+
+    @patch("gfr_curator.cli.GFRCurator")
+    @patch("gfr_curator.cli.is_configured", return_value=True)
+    def test_pdf_flag_passed_to_curator(self, mock_is_configured, mock_curator_cls):
+        mock_instance = MagicMock()
+        mock_curator_cls.return_value = mock_instance
+
+        with patch("os.path.isfile", return_value=True):
+            with patch.object(sys, "argv", ["gfr-curate", "10.1093/jxb/erw425", "--pdf", "sample.pdf", "--model", "gpt-4o", "--key", "sk-test"]):
+                main()
+                mock_curator_cls.assert_called_once()
+                call_kwargs = mock_curator_cls.call_args[1]
+                self.assertEqual(call_kwargs.get("pdf_path"), "sample.pdf")
+                mock_instance.execute.assert_called_once()
+
+    @patch("gfr_curator.cli.GFRCurator")
+    @patch("gfr_curator.cli.is_configured", return_value=True)
+    def test_positional_pdf_argument_defers_doi_to_curator(self, mock_is_configured, mock_curator_cls):
+        mock_instance = MagicMock()
+        mock_curator_cls.return_value = mock_instance
+
+        with patch("os.path.isfile", return_value=True), \
+             patch("gfr_curator.cli.console.input") as mock_input:
+            with patch.object(sys, "argv", ["gfr-curate", "paper.pdf", "--model", "gpt-4o", "--key", "sk-test"]):
+                main()
+                # No interactive DOI prompt: the curator detects the DOI from the PDF
+                mock_input.assert_not_called()
+                mock_curator_cls.assert_called_once()
+                call_args = mock_curator_cls.call_args[0]
+                call_kwargs = mock_curator_cls.call_args[1]
+                self.assertFalse(call_args[0])
+                self.assertEqual(call_kwargs.get("pdf_path"), "paper.pdf")
+                mock_instance.execute.assert_called_once()
+
+    @patch("gfr_curator.cli.is_configured", return_value=True)
+    def test_nonexistent_pdf_flag_exits(self, mock_is_configured):
+        with patch.object(sys, "argv", ["gfr-curate", "10.1093/jxb/erw425", "--pdf", "nonexistent_file_xyz.pdf", "--model", "gpt-4o", "--key", "sk-test"]):
+            with self.assertRaises(SystemExit) as cm:
+                main()
+            self.assertEqual(cm.exception.code, 1)
 
     @patch("gfr_curator.cli.GFRCurator")
     @patch("gfr_curator.cli.is_configured", return_value=True)
