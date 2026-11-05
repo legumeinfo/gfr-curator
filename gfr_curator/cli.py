@@ -46,7 +46,7 @@ def main():
         print("\nOptions:")
         print("  DOI                Digital Object Identifier of the publication")
         print("  --pdf PATH         Path to a local PDF file to use instead of fetching full text from the web")
-        print("  --model MODEL      LLM model identifier (e.g. gpt-4o, claude-3-5-sonnet-20241022,")
+        print("  --model MODEL      LLM model identifier (e.g. gpt-4o, claude-sonnet-5-5,")
         print("                     gemini/gemini-flash-lite-latest)")
         print("  --key API_KEY      API key for the selected model provider")
         print("  --debug            Show detailed diagnostic and operational details as the program runs")

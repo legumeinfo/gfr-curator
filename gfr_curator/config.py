@@ -123,46 +123,80 @@ def is_configured() -> bool:
     data = read_config_dict()
     return bool(data.get("LLM_MODEL") or any(k.endswith("_KEY") for k in data))
 
-DEFAULT_OPENROUTER_MODELS = [
-    "openrouter/~deepseek/deepseek-flash-latest",
-    "openrouter/~deepseek/deepseek-pro-latest",
-    "openrouter/deepseek/deepseek-chat",
-    "openrouter/deepseek/deepseek-r1",
-    "openrouter/anthropic/claude-3.7-sonnet",
-    "openrouter/anthropic/claude-3.5-sonnet",
-    "openrouter/anthropic/claude-3.5-haiku",
-    "openrouter/google/gemini-2.5-flash",
-    "openrouter/google/gemini-2.5-pro",
-    "openrouter/google/gemini-flash-1.5",
-    "openrouter/openai/gpt-4o",
-    "openrouter/openai/gpt-4o-mini",
-    "openrouter/openai/o3-mini",
-    "openrouter/meta-llama/llama-3.3-70b-instruct",
-    "openrouter/meta-llama/llama-3.1-8b-instruct",
-    "openrouter/meta-llama/llama-3.1-70b-instruct",
-    "openrouter/qwen/qwen-2.5-72b-instruct",
-    "openrouter/mistralai/mistral-large-2411",
-    "openrouter/mistralai/mistral-small-24b-instruct-2501",
-]
+def _litellm_model_registry() -> dict:
+    """
+    Returns LiteLLM's model registry: the copy bundled with the installed package, overlaid
+    with litellm.model_cost. The bundled copy is always read because litellm.model_cost may be
+    replaced at import time by a remote map that omits some providers (e.g. OpenRouter).
+    """
+    registry = {}
+    try:
+        from importlib.resources import files
+        bundled = files("litellm") / "model_prices_and_context_window_backup.json"
+        registry.update(json.loads(bundled.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    try:
+        import litellm
+        registry.update(getattr(litellm, "model_cost", {}) or {})
+    except Exception:
+        pass
+    registry.pop("sample_spec", None)
+    return registry
+
+def _registry_models(provider: str) -> list:
+    """Returns chat model names for a provider from LiteLLM's registry."""
+    return [
+        name for name, meta in _litellm_model_registry().items()
+        if isinstance(meta, dict)
+        and meta.get("litellm_provider") == provider
+        and meta.get("mode", "chat") == "chat"
+    ]
+
+def get_local_ollama_models(timeout: float = 0.5) -> list:
+    """
+    Returns models installed in the local Ollama server (via its /api/tags endpoint),
+    formatted as 'ollama/<name>'. Returns [] if Ollama is not running.
+    """
+    base = (os.environ.get("OLLAMA_API_BASE") or "http://localhost:11434").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return []
+    models = []
+    for item in data.get("models", []):
+        name = item.get("name") or item.get("model")
+        if name:
+            models.append(f"ollama/{name.removesuffix(':latest')}")
+    return models
+
+def _read_openrouter_cache(cache_file: Path, max_age: float = None) -> list:
+    """Returns cached OpenRouter models, or [] if missing, invalid, or older than max_age seconds."""
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        if not isinstance(cached, dict):
+            return []
+        if max_age is not None and time.time() - cached.get("timestamp", 0) >= max_age:
+            return []
+        models = cached.get("models")
+        return models if isinstance(models, list) else []
+    except Exception:
+        return []
 
 def get_openrouter_models(timeout: float = 1.5) -> list:
     """
-    Returns a list of OpenRouter chat models, using local cache or fetching from OpenRouter API.
-    Falls back to a curated list of popular models if unreachable or offline.
+    Returns a list of OpenRouter chat models, in order of preference:
+    a fresh local cache, the live OpenRouter API, an expired cache, then the
+    registry bundled with LiteLLM.
     """
     cache_file = get_config_dir() / "openrouter_models.json"
     cache_ttl = 7 * 86400  # 7 days
 
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            if isinstance(cached, dict) and time.time() - cached.get("timestamp", 0) < cache_ttl:
-                models = cached.get("models")
-                if models and isinstance(models, list):
-                    return models
-        except Exception:
-            pass
+    models = _read_openrouter_cache(cache_file, max_age=cache_ttl)
+    if models:
+        return models
 
     # Try fetching dynamically from OpenRouter public API
     try:
@@ -195,18 +229,7 @@ def get_openrouter_models(timeout: float = 1.5) -> list:
     except Exception:
         pass
 
-    # Fallback to expired cache if available
-    if cache_file.exists():
-        try:
-            with open(cache_file, "r", encoding="utf-8") as f:
-                cached = json.load(f)
-            models = cached.get("models")
-            if models and isinstance(models, list):
-                return models
-        except Exception:
-            pass
-
-    return list(DEFAULT_OPENROUTER_MODELS)
+    return _read_openrouter_cache(cache_file) or _registry_models("openrouter")
 
 def get_all_known_models() -> list:
     """
@@ -252,99 +275,68 @@ def get_all_known_models() -> list:
         ))
         return (0 if is_flagship else 1, name)
 
+    cost_dict = _litellm_model_registry()
     try:
         import litellm
-        cost_dict = getattr(litellm, "model_cost", {})
         models_by_prov = getattr(litellm, "models_by_provider", {})
-
-        # 1. Primary provider chat models
-        for prov in primary_providers:
-            prov_models = []
-            for name, meta in cost_dict.items():
-                if not isinstance(meta, dict):
-                    continue
-                if meta.get("litellm_provider", "").lower() == prov and is_desirable_chat(name, meta):
-                    formatted = f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name
-                    if formatted not in seen:
-                        seen.add(formatted)
-                        prov_models.append(formatted)
-
-            for name in models_by_prov.get(prov, set()):
-                if is_desirable_chat(name):
-                    formatted = f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name
-                    if formatted not in seen:
-                        seen.add(formatted)
-                        prov_models.append(formatted)
-
-            if prov == "anthropic":
-                for am in [
-                    "claude-3-7-sonnet-20250219",
-                    "claude-3-5-sonnet-20241022",
-                    "claude-3-5-haiku-20241022",
-                    "claude-3-opus-20240229",
-                ]:
-                    if am not in seen:
-                        seen.add(am)
-                        prov_models.append(am)
-
-            if prov == "ollama":
-                for om in [
-                    "ollama/llama3",
-                    "ollama/llama3.1",
-                    "ollama/llama3.2",
-                    "ollama/llama3.3",
-                    "ollama/deepseek-r1",
-                    "ollama/qwen2.5",
-                    "ollama/mistral",
-                ]:
-                    if om not in seen:
-                        seen.add(om)
-                        prov_models.append(om)
-
-            if prov == "openrouter":
-                for om in get_openrouter_models():
-                    if is_desirable_chat(om) and om not in seen:
-                        seen.add(om)
-                        prov_models.append(om)
-
-            prov_models.sort(key=model_sort_key)
-            models.extend(prov_models)
-
-        # 2. Other chat models in cost_dict
-        other_chat = []
-        for name, meta in cost_dict.items():
-            if isinstance(meta, dict) and meta.get("mode") == "chat" and is_desirable_chat(name, meta):
-                if name not in seen and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
-                    seen.add(name)
-                    other_chat.append(name)
-        other_chat.sort(key=model_sort_key)
-        models.extend(other_chat)
-
-        # 3. Any remaining models from litellm.model_list
-        other_general = []
-        for name in getattr(litellm, "model_list", []):
-            if is_desirable_chat(name) and name not in seen and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
-                seen.add(name)
-                other_general.append(name)
-        other_general.sort()
-        models.extend(other_general)
-
+        model_list = getattr(litellm, "model_list", [])
     except Exception:
-        pass
+        models_by_prov, model_list = {}, []
 
-    if not models:
-        models = [
-            "gemini/gemini-flash-lite-latest",
-            "gemini/gemini-2.5-flash",
-            "gpt-4o",
-            "gpt-4o-mini",
-            "claude-3-5-sonnet-20241022",
-            "deepseek/deepseek-chat",
-            "ollama/llama3",
-            "openrouter/~deepseek/deepseek-flash-latest",
-            "openrouter/deepseek/deepseek-chat",
-            "openrouter/anthropic/claude-3.5-sonnet",
-        ]
+    def add(name: str, bucket: list):
+        if name not in seen:
+            seen.add(name)
+            bucket.append(name)
+
+    # 1. Primary provider chat models
+    for prov in primary_providers:
+        prov_models = []
+        for name, meta in cost_dict.items():
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("litellm_provider", "").lower() == prov and is_desirable_chat(name, meta):
+                add(f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name, prov_models)
+
+        for name in models_by_prov.get(prov, set()):
+            if is_desirable_chat(name):
+                add(f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name, prov_models)
+
+        if prov == "openrouter":
+            for om in get_openrouter_models():
+                if is_desirable_chat(om):
+                    add(om, prov_models)
+
+        prov_models.sort(key=model_sort_key)
+
+        # Models actually installed in the local Ollama server go first
+        if prov == "ollama":
+            installed = []
+            for om in get_local_ollama_models():
+                if om in seen:
+                    prov_models.remove(om)
+                else:
+                    seen.add(om)
+                installed.append(om)
+            prov_models = installed + prov_models
+
+        models.extend(prov_models)
+
+    # 2. Other chat models in the registry
+    other_chat = []
+    for name, meta in cost_dict.items():
+        if isinstance(meta, dict) and meta.get("mode") == "chat" and is_desirable_chat(name, meta):
+            if not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
+                add(name, other_chat)
+    other_chat.sort(key=model_sort_key)
+    models.extend(other_chat)
+
+    # 3. Any remaining models from litellm.model_list
+    other_general = []
+    for name in model_list:
+        if is_desirable_chat(name) and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
+            add(name, other_general)
+    other_general.sort()
+    models.extend(other_general)
 
     return models
 

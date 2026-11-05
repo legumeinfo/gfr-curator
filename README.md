@@ -86,14 +86,7 @@ gfr-curate 10.1093/jxb/erw425 --mcp-url http://127.0.0.1:8000
 Override your configured model with `--model` (supports any [LiteLLM model](https://docs.litellm.ai/docs/providers)):
 
 ```bash
-# OpenAI
 gfr-curate 10.1093/jxb/erw425 --model gpt-4o
-
-# Anthropic
-gfr-curate 10.1093/jxb/erw425 --model claude-3-5-sonnet-20241022
-
-# Local model via Ollama
-gfr-curate 10.1093/jxb/erw425 --model ollama/llama3
 
 # Pass an API key directly
 gfr-curate 10.1093/jxb/erw425 --model gpt-4o --key <api-key>
