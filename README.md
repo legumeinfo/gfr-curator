@@ -46,6 +46,18 @@ Or run without arguments to enter the DOI interactively:
 gfr-curate
 ```
 
+#### Curate using a Local PDF
+
+You can point `gfr-curate` to a local PDF file using `--pdf` or by passing the PDF file path. The tool extracts text from the local PDF instead of attempting to fetch the paper full text from the web:
+
+```bash
+# Provide DOI and local PDF
+gfr-curate 10.1038/s41588-026-02577-z --pdf 41588_2026_Article_2577.pdf
+
+# Or pass the PDF path directly (DOI is automatically detected from the PDF)
+gfr-curate 41588_2026_Article_2577.pdf
+```
+
 Draft YAML files are written to the current working directory and checked against `schema.json`.
 
 ### Legumista
@@ -74,14 +86,7 @@ gfr-curate 10.1093/jxb/erw425 --mcp-url http://127.0.0.1:8000
 Override your configured model with `--model` (supports any [LiteLLM model](https://docs.litellm.ai/docs/providers)):
 
 ```bash
-# OpenAI
 gfr-curate 10.1093/jxb/erw425 --model gpt-4o
-
-# Anthropic
-gfr-curate 10.1093/jxb/erw425 --model claude-3-5-sonnet-20241022
-
-# Local model via Ollama
-gfr-curate 10.1093/jxb/erw425 --model ollama/llama3
 
 # Pass an API key directly
 gfr-curate 10.1093/jxb/erw425 --model gpt-4o --key <api-key>

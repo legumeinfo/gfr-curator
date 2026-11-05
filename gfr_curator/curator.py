@@ -7,6 +7,7 @@ from gfr_curator.apis.ols import lookup_ontology_term
 from gfr_curator.apis.lis_graphql import resolve_lis_identifier
 from gfr_curator.apis.intermine import resolve_symbol_intermine, resolve_gene_name_intermine
 from gfr_curator.apis.legumista_mcp import LegumistaMCPClient
+from gfr_curator.pdf_extractor import extract_text_from_pdf, extract_doi_from_pdf
 from gfr_curator.llm import query_llm, query_gemini_api
 from gfr_curator.yaml_generator import build_yaml_document, resolve_filename
 from gfr_curator.validator import validate_yaml_file
@@ -64,13 +65,14 @@ def format_citation(authors, first_author, year):
     return f"{first_author}, {year}"
 
 class GFRCurator:
-    def __init__(self, doi, api_key=None, model=None, use_mcp=True, mcp_url=None, debug=False):
+    def __init__(self, doi=None, api_key=None, model=None, use_mcp=True, mcp_url=None, debug=False, pdf_path=None):
         self.doi = doi
         self.api_key = api_key
         self.model = model
         self.use_mcp = use_mcp
         self.mcp_url = mcp_url
         self.debug = debug
+        self.pdf_path = os.path.abspath(pdf_path) if pdf_path else None
         self.mcp_client = None
 
     def _debug_msg(self, message: str):
@@ -87,9 +89,36 @@ class GFRCurator:
             ))
         
     def execute(self):
+        # Validate local PDF if provided, and auto-detect DOI if not already known
+        if self.pdf_path:
+            if not os.path.isfile(self.pdf_path):
+                console.print(f"[bold red][!] Error: PDF file not found: {self.pdf_path}[/bold red]")
+                sys.exit(1)
+            self._debug_msg(f"Scanning '{self.pdf_path}' for publication DOI...")
+            detected_doi = extract_doi_from_pdf(self.pdf_path)
+            if detected_doi:
+                console.print(f"[bold green][+] Detected DOI from PDF:[/bold green] [cyan]{detected_doi}[/cyan]")
+            else:
+                console.print("[yellow][!] No DOI detected in the PDF.[/yellow]")
+
+            if not self.doi:
+                if not detected_doi:
+                    console.print(
+                        "[bold red][!] Error: Could not detect a DOI from the PDF file. "
+                        "Please provide one: gfr-curate DOI --pdf PATH[/bold red]"
+                    )
+                    sys.exit(1)
+                self.doi = detected_doi
+            elif detected_doi and detected_doi.lower() != self.doi.strip().lower():
+                console.print(
+                    f"[bold yellow][!] Warning: Provided DOI ({self.doi}) differs from the DOI detected in the PDF "
+                    f"({detected_doi}). Using the provided DOI.[/bold yellow]"
+                )
+
         if self.debug:
             self._debug_panel(
                 f"[bold]Target DOI:[/bold] {self.doi}\n"
+                f"[bold]Local PDF:[/bold] {self.pdf_path or 'None (using web retrieval)'}\n"
                 f"[bold]Model:[/bold] {self.model or os.environ.get('LLM_MODEL') or 'Default provider'}\n"
                 f"[bold]MCP Enabled:[/bold] {self.use_mcp} (URL: {self.mcp_url or 'https://mcp.legumeinfo.org'})\n"
                 f"[bold]Debug Mode:[/bold] Enabled (displaying diagnostic details)",
@@ -113,13 +142,24 @@ class GFRCurator:
 
         # 1. Fetch live metadata and abstract
         full_text = None
+
+        if self.pdf_path:
+            self._debug_msg(f"Loading full text from local PDF: '{self.pdf_path}'...")
+            try:
+                full_text = extract_text_from_pdf(self.pdf_path)
+                self._debug_msg(f"Extracted {len(full_text):,} characters from local PDF.")
+            except Exception as e:
+                console.print(f"[bold red][!] Error extracting text from local PDF:[/bold red] {e}")
+                sys.exit(1)
+
+        step5_desc = "5. [Local PDF provided: skipping web full-text retrieval]" if self.pdf_path else "5. Check Legumista MCP 'read_paper' for open-access full-text retrieval."
         self._debug_panel(
             f"Resolving metadata for DOI '{self.doi}':\n"
             f"1. Query Europe PMC REST API for PMID, title, authors, and publication year.\n"
             f"2. Query NCBI E-utilities (efetch) for abstract XML if PMID was resolved.\n"
             f"3. Query Legumista MCP 'openalex_by_doi' to enrich missing fields.\n"
             f"4. Fallback to Crossref API if abstract is still not found.\n"
-            f"5. Check Legumista MCP 'read_paper' for open-access full-text retrieval.",
+            f"{step5_desc}",
             "Debug: Metadata Retrieval"
         )
 
@@ -141,20 +181,20 @@ class GFRCurator:
                 oa_meta = self.mcp_client.openalex_by_doi(self.doi)
                 if oa_meta:
                     self._debug_msg("OpenAlex metadata retrieved; checking for missing fields to merge...")
-                    if paper_meta["title"] == "null" and oa_meta.get("title"):
+                    if paper_meta.get("title") in ("null", None) and oa_meta.get("title"):
                         self._debug_msg(f"Filled title from OpenAlex: {oa_meta['title'][:60]}...")
                         paper_meta["title"] = oa_meta["title"]
                     if (not paper_meta.get("authors") or paper_meta.get("first_author") == "Author") and oa_meta.get("authors"):
                         self._debug_msg(f"Filled authors from OpenAlex ({len(oa_meta['authors'])} authors)")
                         paper_meta["authors"] = oa_meta["authors"]
                         paper_meta["first_author"] = oa_meta.get("first_author", "Author")
-                    if paper_meta["year"] == "null" and oa_meta.get("year"):
+                    if paper_meta.get("year") in ("null", None) and oa_meta.get("year"):
                         self._debug_msg(f"Filled publication year from OpenAlex: {oa_meta['year']}")
                         paper_meta["year"] = oa_meta["year"]
                     if not paper_meta.get("abstract") and oa_meta.get("abstract"):
                         self._debug_msg(f"Filled abstract from OpenAlex ({len(oa_meta['abstract'])} chars)")
                         paper_meta["abstract"] = oa_meta["abstract"]
-                    if paper_meta.get("pmid") == "null" and oa_meta.get("pmid"):
+                    if paper_meta.get("pmid") in ("null", None) and oa_meta.get("pmid"):
                         self._debug_msg(f"Filled PMID from OpenAlex: {oa_meta['pmid']}")
                         paper_meta["pmid"] = oa_meta["pmid"]
 
@@ -177,8 +217,8 @@ class GFRCurator:
             paper_meta["citation"] = citation
             self._debug_msg(f"Derived GFR citation: '{citation}'")
 
-            # Fetch open-access full text via Legumista read_paper if MCP is active
-            if self.mcp_client:
+            # Fetch open-access full text via Legumista read_paper if MCP is active and no local PDF
+            if not self.pdf_path and self.mcp_client:
                 self._debug_msg(f"Attempting open-access full text retrieval via Legumista 'read_paper'...")
                 full_text = self.mcp_client.read_paper(self.doi)
                 if full_text:
@@ -192,7 +232,10 @@ class GFRCurator:
         console.print(f"    [bold]PMID:[/bold]     {paper_meta['pmid']}")
         console.print(f"    [bold]DOI:[/bold]      {paper_meta['doi']}")
         if full_text:
-            console.print(f"    [bold]Full Text:[/bold] [green]Retrieved ({len(full_text):,} chars via Legumista OA)[/green]\n")
+            if self.pdf_path:
+                console.print(f"    [bold]Full Text:[/bold] [green]Loaded from local PDF ({len(full_text):,} chars: {os.path.basename(self.pdf_path)})[/green]\n")
+            else:
+                console.print(f"    [bold]Full Text:[/bold] [green]Retrieved ({len(full_text):,} chars via Legumista OA)[/green]\n")
         else:
             console.print("    [bold]Full Text:[/bold] [dim]Not available open-access (using abstract)[/dim]\n")
 

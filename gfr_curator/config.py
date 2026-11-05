@@ -1,18 +1,14 @@
+import json
 import os
 import sys
+import time
+import urllib.request
 from pathlib import Path
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 
 console = Console()
-
-MODEL_CHOICES = [
-    ("gemini/gemini-flash-lite-latest", "free tier"),
-    ("gpt-4o-mini", ""),
-    ("claude-3-5-sonnet-20241022", ""),
-    ("ollama/llama3", "local"),
-]
 
 def get_config_dir() -> Path:
     """Returns the user configuration directory path."""
@@ -127,6 +123,114 @@ def is_configured() -> bool:
     data = read_config_dict()
     return bool(data.get("LLM_MODEL") or any(k.endswith("_KEY") for k in data))
 
+def _litellm_model_registry() -> dict:
+    """
+    Returns LiteLLM's model registry: the copy bundled with the installed package, overlaid
+    with litellm.model_cost. The bundled copy is always read because litellm.model_cost may be
+    replaced at import time by a remote map that omits some providers (e.g. OpenRouter).
+    """
+    registry = {}
+    try:
+        from importlib.resources import files
+        bundled = files("litellm") / "model_prices_and_context_window_backup.json"
+        registry.update(json.loads(bundled.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    try:
+        import litellm
+        registry.update(getattr(litellm, "model_cost", {}) or {})
+    except Exception:
+        pass
+    registry.pop("sample_spec", None)
+    return registry
+
+def _registry_models(provider: str) -> list:
+    """Returns chat model names for a provider from LiteLLM's registry."""
+    return [
+        name for name, meta in _litellm_model_registry().items()
+        if isinstance(meta, dict)
+        and meta.get("litellm_provider") == provider
+        and meta.get("mode", "chat") == "chat"
+    ]
+
+def get_local_ollama_models(timeout: float = 0.5) -> list:
+    """
+    Returns models installed in the local Ollama server (via its /api/tags endpoint),
+    formatted as 'ollama/<name>'. Returns [] if Ollama is not running.
+    """
+    base = (os.environ.get("OLLAMA_API_BASE") or "http://localhost:11434").rstrip("/")
+    try:
+        with urllib.request.urlopen(f"{base}/api/tags", timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return []
+    models = []
+    for item in data.get("models", []):
+        name = item.get("name") or item.get("model")
+        if name:
+            models.append(f"ollama/{name.removesuffix(':latest')}")
+    return models
+
+def _read_openrouter_cache(cache_file: Path, max_age: float = None) -> list:
+    """Returns cached OpenRouter models, or [] if missing, invalid, or older than max_age seconds."""
+    try:
+        with open(cache_file, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        if not isinstance(cached, dict):
+            return []
+        if max_age is not None and time.time() - cached.get("timestamp", 0) >= max_age:
+            return []
+        models = cached.get("models")
+        return models if isinstance(models, list) else []
+    except Exception:
+        return []
+
+def get_openrouter_models(timeout: float = 1.5) -> list:
+    """
+    Returns a list of OpenRouter chat models, in order of preference:
+    a fresh local cache, the live OpenRouter API, an expired cache, then the
+    registry bundled with LiteLLM.
+    """
+    cache_file = get_config_dir() / "openrouter_models.json"
+    cache_ttl = 7 * 86400  # 7 days
+
+    models = _read_openrouter_cache(cache_file, max_age=cache_ttl)
+    if models:
+        return models
+
+    # Try fetching dynamically from OpenRouter public API
+    try:
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/models",
+            headers={"User-Agent": "gfr-curator"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        models = []
+        for item in data.get("data", []):
+            m_id = item.get("id")
+            if not m_id:
+                continue
+            endpoints = item.get("endpoints") or []
+            if endpoints and "/api/v1/chat/completions" not in endpoints:
+                continue
+            formatted = m_id if m_id.startswith("openrouter/") else f"openrouter/{m_id}"
+            models.append(formatted)
+
+        if models:
+            try:
+                get_config_dir().mkdir(mode=0o700, parents=True, exist_ok=True)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump({"timestamp": time.time(), "models": models}, f)
+            except Exception:
+                pass
+            return models
+    except Exception:
+        pass
+
+    return _read_openrouter_cache(cache_file) or _registry_models("openrouter")
+
 def get_all_known_models() -> list:
     """
     Returns a deduplicated list of chat models dynamically pulled from LiteLLM's registry,
@@ -134,12 +238,6 @@ def get_all_known_models() -> list:
     """
     seen = set()
     models = []
-
-    # Include default quick-pick choices first
-    for m, _ in MODEL_CHOICES:
-        if m not in seen:
-            seen.add(m)
-            models.append(m)
 
     primary_providers = [
         "gemini",
@@ -177,54 +275,68 @@ def get_all_known_models() -> list:
         ))
         return (0 if is_flagship else 1, name)
 
+    cost_dict = _litellm_model_registry()
     try:
         import litellm
-        cost_dict = getattr(litellm, "model_cost", {})
         models_by_prov = getattr(litellm, "models_by_provider", {})
-
-        # 1. Primary provider chat models
-        for prov in primary_providers:
-            prov_models = []
-            for name, meta in cost_dict.items():
-                if not isinstance(meta, dict):
-                    continue
-                if meta.get("litellm_provider", "").lower() == prov and is_desirable_chat(name, meta):
-                    formatted = f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name
-                    if formatted not in seen:
-                        seen.add(formatted)
-                        prov_models.append(formatted)
-
-            for name in models_by_prov.get(prov, set()):
-                if is_desirable_chat(name):
-                    formatted = f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name
-                    if formatted not in seen:
-                        seen.add(formatted)
-                        prov_models.append(formatted)
-
-            prov_models.sort(key=model_sort_key)
-            models.extend(prov_models)
-
-        # 2. Other chat models in cost_dict
-        other_chat = []
-        for name, meta in cost_dict.items():
-            if isinstance(meta, dict) and meta.get("mode") == "chat" and is_desirable_chat(name, meta):
-                if name not in seen and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
-                    seen.add(name)
-                    other_chat.append(name)
-        other_chat.sort(key=model_sort_key)
-        models.extend(other_chat)
-
-        # 3. Any remaining models from litellm.model_list
-        other_general = []
-        for name in getattr(litellm, "model_list", []):
-            if is_desirable_chat(name) and name not in seen and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
-                seen.add(name)
-                other_general.append(name)
-        other_general.sort()
-        models.extend(other_general)
-
+        model_list = getattr(litellm, "model_list", [])
     except Exception:
-        pass
+        models_by_prov, model_list = {}, []
+
+    def add(name: str, bucket: list):
+        if name not in seen:
+            seen.add(name)
+            bucket.append(name)
+
+    # 1. Primary provider chat models
+    for prov in primary_providers:
+        prov_models = []
+        for name, meta in cost_dict.items():
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("litellm_provider", "").lower() == prov and is_desirable_chat(name, meta):
+                add(f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name, prov_models)
+
+        for name in models_by_prov.get(prov, set()):
+            if is_desirable_chat(name):
+                add(f"gemini/{name}" if prov == "gemini" and not name.startswith("gemini/") else name, prov_models)
+
+        if prov == "openrouter":
+            for om in get_openrouter_models():
+                if is_desirable_chat(om):
+                    add(om, prov_models)
+
+        prov_models.sort(key=model_sort_key)
+
+        # Models actually installed in the local Ollama server go first
+        if prov == "ollama":
+            installed = []
+            for om in get_local_ollama_models():
+                if om in seen:
+                    prov_models.remove(om)
+                else:
+                    seen.add(om)
+                installed.append(om)
+            prov_models = installed + prov_models
+
+        models.extend(prov_models)
+
+    # 2. Other chat models in the registry
+    other_chat = []
+    for name, meta in cost_dict.items():
+        if isinstance(meta, dict) and meta.get("mode") == "chat" and is_desirable_chat(name, meta):
+            if not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
+                add(name, other_chat)
+    other_chat.sort(key=model_sort_key)
+    models.extend(other_chat)
+
+    # 3. Any remaining models from litellm.model_list
+    other_general = []
+    for name in model_list:
+        if is_desirable_chat(name) and not name.startswith("bedrock/") and not name.startswith("sagemaker/"):
+            add(name, other_general)
+    other_general.sort()
+    models.extend(other_general)
 
     return models
 
@@ -290,7 +402,7 @@ class ModelCompleter(Completer):
                 if count >= 25:
                     return
 
-def _prompt_toolkit_select(all_models: list, initial_query: str = "") -> str:
+def _prompt_toolkit_select(all_models: list, initial_query: str = "", current_model: str = "") -> str:
     """Invokes prompt_toolkit interactive prompt with live dropdown completion."""
     from prompt_toolkit.shortcuts import prompt as pt_prompt, CompleteStyle
     from prompt_toolkit.styles import Style
@@ -343,9 +455,10 @@ def _prompt_toolkit_select(all_models: list, initial_query: str = "") -> str:
     })
 
     completer = ModelCompleter(all_models)
+    prompt_str = f"Search model (default: {current_model}): " if current_model else "Search model: "
 
     return pt_prompt(
-        "Search model: ",
+        prompt_str,
         default=initial_query,
         completer=completer,
         complete_while_typing=True,
@@ -361,10 +474,14 @@ def search_and_select_model(current_model="gemini/gemini-flash-lite-latest", out
     """
     c = out_console or console
     all_models = get_all_known_models()
+    if current_model:
+        if current_model in all_models:
+            all_models.remove(current_model)
+        all_models.insert(0, current_model)
 
     if sys.stdin.isatty():
         try:
-            selected = _prompt_toolkit_select(all_models, initial_query)
+            selected = _prompt_toolkit_select(all_models, initial_query=initial_query, current_model=current_model)
             if not selected:
                 return current_model
 
@@ -377,16 +494,17 @@ def search_and_select_model(current_model="gemini/gemini-flash-lite-latest", out
             return selected
 
         except (KeyboardInterrupt, EOFError):
-            return current_model
+            raise
         except Exception as e:
             c.print(f"[dim](Interactive dropdown unavailable: {e})[/dim]")
 
     # Non-interactive fallback
     try:
-        query = c.input(f"Enter model name (default: {current_model}): ").strip()
+        prompt_str = f"Search model (default: {current_model}): " if current_model else "Search model: "
+        query = c.input(prompt_str).strip()
         return query if query else current_model
     except (KeyboardInterrupt, EOFError):
-        return current_model
+        raise
 
 def prompt_masked_key(prompt_text: str, out_console=None) -> str:
     """
@@ -421,43 +539,12 @@ def run_configurator(out_console=None, is_initial=False):
         c.print()
 
     # 1. Model Selection
-    c.print("[bold]Select model:[/bold]")
-    for idx, (m_id, m_desc) in enumerate(MODEL_CHOICES, 1):
-        desc = f" [dim]({m_desc})[/dim]" if m_desc else ""
-        marker = " [green](current)[/green]" if m_id == current_model and not is_initial else ""
-        c.print(f"  [cyan][{idx}][/cyan] {m_id}{desc}{marker}")
-    c.print(f"  [cyan][{len(MODEL_CHOICES) + 1}][/cyan] Search all models...\n")
-
-    default_choice = "1"
-    for idx, (m_id, _) in enumerate(MODEL_CHOICES, 1):
-        if m_id == current_model:
-            default_choice = str(idx)
-            break
-
+    c.print("[bold]Select model:[/bold] [dim](type to search, ↑/↓ to navigate, Enter to select)[/dim]")
     try:
-        selection = c.input(f"Choose model [1-{len(MODEL_CHOICES) + 1}] (default: {default_choice}): ").strip()
+        chosen_model = search_and_select_model(current_model=current_model, out_console=c)
     except (KeyboardInterrupt, EOFError):
         c.print("\nCancelled.")
         sys.exit(1)
-
-    if not selection:
-        selection = default_choice
-
-    chosen_model = None
-    if selection.isdigit():
-        idx_val = int(selection)
-        if 1 <= idx_val <= len(MODEL_CHOICES):
-            chosen_model = MODEL_CHOICES[idx_val - 1][0]
-        elif idx_val == len(MODEL_CHOICES) + 1:
-            chosen_model = search_and_select_model(current_model=current_model, out_console=c)
-    elif selection.lower() in ("search", "other", "s"):
-        chosen_model = search_and_select_model(current_model=current_model, out_console=c)
-    else:
-        all_models = get_all_known_models()
-        if selection in all_models:
-            chosen_model = selection
-        else:
-            chosen_model = search_and_select_model(current_model=current_model, out_console=c, initial_query=selection)
 
     if not chosen_model:
         chosen_model = current_model or "gemini/gemini-flash-lite-latest"
